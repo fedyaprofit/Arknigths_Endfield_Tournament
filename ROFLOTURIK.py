@@ -644,15 +644,27 @@ def participant_interface(player_num):
             picks_interface(player_num)
         else:
             st.success("✅ Этап пиков завершен!")
-            st.info("⏳ Ожидайте команду Судьи для перехода на следующий этап.")
+            st.info("⏳ Ожидайте команду Судьи для перехода в комнату ожидания.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_picks_{player_num}"):
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
     
-    elif current_stage == "finished":
+    elif current_stage == "waiting_room":
+        waiting_room_interface(player_num)
+    
+    elif current_stage == "battle":
         st.success("🏆 ПОЗДРАВЛЯЮ! Все этапы пройдены!")
+        st.info("⚔️ Ожидайте начала боев от Судьи.")
+        
+        if st.button("🔄 Проверить статус", key=f"check_status_battle_{player_num}"):
+            load_my_data(player_num)
+            load_opponent_data(player_num)
+            st.rerun()
+    
+    elif current_stage == "finished":
+        st.success("🏆 ПОЗДРАВЛЯЮ! Турнир завершен!")
         st.balloons()
 
 # ========== 4. ИНТЕРФЕЙС ЗАКУПОК ==========
@@ -2212,7 +2224,195 @@ def picks_interface(player_num):
                 st.balloons()
                 time.sleep(1)
                 st.rerun()
-# ========== 4. ИНТЕРФЕЙС СУДЬИ (ЗАЦИКЛЕН) ==========
+
+# ========== 8. КОМНАТА ОЖИДАНИЯ УЧАСТНИКА  ==========
+
+def waiting_room_interface(player_num):
+    """Комната ожидания — отображение итоговой информации перед боем в реальной игре"""
+    
+    # Загружаем свои данные
+    load_my_data(player_num)
+    # Загружаем данные противника
+    load_opponent_data(player_num)
+    
+    if player_num == 1:
+        data = st.session_state.p1
+        opponent_data = st.session_state.p2
+    else:
+        data = st.session_state.p2
+        opponent_data = st.session_state.p1
+    
+    st.markdown("## 🏨 Комната ожидания")
+    st.markdown(f"**{data.get('nickname', 'Участник')}**, вы завершили все этапы!")
+    st.caption("Ожидайте начала реальных боёв в игре. После завершения турнира вы можете выйти.")
+    
+    st.divider()
+    
+    # Кнопка выхода (единственная активная кнопка)
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.button("🚪 Выйти из турнира", key=f"exit_waiting_{player_num}", use_container_width=True):
+            if player_num == 1:
+                st.session_state.auth_player1 = False
+            else:
+                st.session_state.auth_player2 = False
+            st.session_state.current_role = None
+            save_player_data(player_num)
+            st.rerun()
+    
+    st.divider()
+    
+    # ========== ТАБЛИЦА 2x5 ==========
+    st.markdown("### 📊 Сводная информация")
+    
+    # Создаём 5 колонок для заголовков
+    col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        st.markdown("**Ресурсы**")
+    with col2:
+        st.markdown("**Защита**")
+    with col3:
+        st.markdown("**Бан (ваш)**")
+    with col4:
+        st.markdown("**Бан (противник)**")
+    with col5:
+        st.markdown("**Пачки**")
+    
+    # Вторая строка — данные
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        resources = data.get("resources", {})
+        bought = []
+        for res_name, count in resources.items():
+            if count > 0:
+                if res_name == "🔄 Рестарт":
+                    purchased = max(0, count - 1)
+                    if purchased > 0:
+                        bought.append(f"{res_name}: +{purchased}")
+                    else:
+                        bought.append(f"{res_name}: 1 (бесплатно)")
+                elif res_name == "🔴 Универсальный бан":
+                    purchased = max(0, count - 1)
+                    if purchased > 0:
+                        bought.append(f"{res_name}: +{purchased}")
+                    else:
+                        bought.append(f"{res_name}: 1 (бесплатно)")
+                else:
+                    bought.append(f"{res_name}: {count}")
+        
+        if bought:
+            for item in bought:
+                st.write(item)
+        else:
+            st.write("—")
+        
+        st.write(f"💎 Осталось: {data.get('points', 12)}")
+    
+    with col2:
+        protected = data.get("protected_heroes", [])
+        character_db = data.get("character_db", {})
+        if protected:
+            for hero_id in protected:
+                hero_info = character_db.get(hero_id, {})
+                st.write(f"🛡️ {hero_info.get('name', '???')}")
+        else:
+            st.write("—")
+    
+    with col3:
+        bans = data.get("bans", {}).get("opponent_bans", [])
+        if bans:
+            for hero_id in bans:
+                hero_info = opponent_data.get("character_db", {}).get(hero_id, {})
+                st.write(f"🔨 {hero_info.get('name', '???')}")
+        else:
+            st.write("—")
+    
+    with col4:
+        opponent_bans = opponent_data.get("bans", {}).get("opponent_bans", [])
+        if opponent_bans:
+            for hero_id in opponent_bans:
+                hero_info = data.get("character_db", {}).get(hero_id, {})
+                st.write(f"🔨 {hero_info.get('name', '???')}")
+        else:
+            st.write("—")
+    
+    with col5:
+        picks = data.get("picks", [])
+        pack_count = 0
+        for pack in picks:
+            if any(slot is not None for slot in pack):
+                pack_count += 1
+        st.write(f"✅ Пачек: {pack_count}/3")
+        if pack_count > 0:
+            st.caption("(подробнее ниже)")
+    
+    st.divider()
+    
+    # ========== ПОДРОБНАЯ ИНФОРМАЦИЯ О ПАЧКАХ ==========
+    st.markdown("### 🎮 Ваши пачки")
+    
+    picks = data.get("picks", [[None for _ in range(4)] for _ in range(3)])
+    character_db = data.get("character_db", {})
+    
+    for pack_idx in range(3):
+        pack = picks[pack_idx]
+        if any(slot is not None for slot in pack):
+            st.markdown(f"#### Пачка {pack_idx + 1}")
+            
+            cols = st.columns(4)
+            for slot_idx, hero_id in enumerate(pack):
+                with cols[slot_idx]:
+                    with st.container(border=True):
+                        if hero_id:
+                            hero_info = character_db.get(hero_id, {})
+                            img = load_operator_image(hero_info.get('name', ''))
+                            if img:
+                                st.image(img, width=80)
+                            else:
+                                st.write("🎴")
+                            rank = 6 if hero_info.get("rarity") == "6⭐" else (5 if hero_info.get("rarity") == "5⭐" else 4)
+                            st.markdown(f"**{hero_info.get('name', '???')}**")
+                            st.caption(f"Lv.{hero_info.get('level', 0)} | П{hero_info.get('potential', 0)} | {rank}")
+                        else:
+                            st.markdown("*⬜*")
+                            st.caption("Пусто")
+            st.divider()
+        else:
+            st.markdown(f"#### Пачка {pack_idx + 1} — пустая")
+            st.divider()
+    
+    # ========== ИНФОРМАЦИЯ О ПРОТИВНИКЕ (кратко) ==========
+    with st.expander("👤 Информация о противнике", expanded=False):
+        st.markdown(f"**{opponent_data.get('nickname', 'Противник')}**")
+        
+        # Защита противника
+        opponent_protected = opponent_data.get("protected_heroes", [])
+        if opponent_protected:
+            st.markdown("**Защита противника:**")
+            for hero_id in opponent_protected:
+                hero_info = opponent_data.get("character_db", {}).get(hero_id, {})
+                st.write(f"🛡️ {hero_info.get('name', '???')}")
+        
+        # Пачки противника
+        opponent_picks = opponent_data.get("picks", [])
+        st.markdown("**Пачки противника:**")
+        for pack_idx, pack in enumerate(opponent_picks):
+            if any(slot is not None for slot in pack):
+                hero_names = []
+                for hero_id in pack:
+                    if hero_id:
+                        hero_info = opponent_data.get("character_db", {}).get(hero_id, {})
+                        hero_names.append(f"{hero_info.get('name', '?')}")
+                st.write(f"Пачка {pack_idx + 1}: {', '.join(hero_names) if hero_names else 'пустая'}")
+            else:
+                st.write(f"Пачка {pack_idx + 1}: пустая")
+    
+    st.divider()
+    st.caption("🏆 После завершения реальных боёв в игре, судья объявит результаты и завершит турнир.")
+
+
+# ========== 9. ИНТЕРФЕЙС СУДЬИ ==========
 
 def judge_interface():
     """Интерфейс судьи"""
@@ -2226,14 +2426,25 @@ def judge_interface():
         rooms_selection_only_interface()
         return
     
+    # Загружаем данные
+    load_judge_data()
+    
+    p1 = st.session_state.get("p1", {})
+    p2 = st.session_state.get("p2", {})
+    
+    # ========== ЕСЛИ ЭТАП БОЯ - ПОКАЗЫВАЕМ ИНТЕРФЕЙС БОЯ ==========
+    if p1.get("stage") == "battle" or p2.get("stage") == "battle":
+        battle_interface()
+        return
+
     # Информационная панель
-    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
     with col1:
         st.markdown("## ⚖️ Панель Судьи")
     with col2:
         st.caption("Ключ: `judge_2024`")
     with col3:
-        if st.button("📥 Собрать данные участников", key="sync_btn", use_container_width=True):
+        if st.button("📥 Собрать данные", key="sync_btn", use_container_width=True):
             # Загружаем данные из файлов участников
             if os.path.exists(PLAYER1_FILE):
                 try:
@@ -2255,7 +2466,7 @@ def judge_interface():
                 except Exception as e:
                     st.error(f"Ошибка загрузки Участника 2: {e}")
             
-            # Сохраняем в файл судьи вместе с выбранными комнатами
+            # Сохраняем в файл судьи
             judge_state = {
                 "p1": st.session_state.p1,
                 "p2": st.session_state.p2,
@@ -2264,11 +2475,16 @@ def judge_interface():
             with open(JUDGE_FILE, "w", encoding="utf-8") as f:
                 json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
             
-            st.success("📁 Данные участников и выбранные комнаты сохранены в judge_data.json!")
+            st.success("📁 Данные сохранены в judge_data.json!")
             time.sleep(1)
             st.rerun()
     
     with col4:
+        if st.button("🔄 Обновить", key="refresh_judge_btn", use_container_width=True):
+            load_judge_data()
+            st.rerun()
+    
+    with col5:
         if st.button("🚪 Выйти", key="exit_judge", use_container_width=True):
             st.session_state.auth_judge = False
             st.session_state.current_role = None
@@ -2276,27 +2492,8 @@ def judge_interface():
     
     st.divider()
     
-    # Загружаем данные из файла судьи (если он существует)
-    if os.path.exists(JUDGE_FILE):
-        try:
-            with open(JUDGE_FILE, "r", encoding="utf-8") as f:
-                judge_data = json.load(f)
-                for key, value in judge_data.get("p1", {}).items():
-                    st.session_state.p1[key] = value
-                for key, value in judge_data.get("p2", {}).items():
-                    st.session_state.p2[key] = value
-                if "selected_rooms" in judge_data:
-                    st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
-        except Exception as e:
-            st.warning(f"Не удалось загрузить judge_data.json: {e}")
-    
-    # ПРОВЕРКА: убеждаемся, что данные загружены корректно
-    if "p1" not in st.session_state:
-        st.session_state.p1 = get_empty_participant_data()
-    if "p2" not in st.session_state:
-        st.session_state.p2 = get_empty_participant_data()
-    if "temp_selected_rooms" not in st.session_state:
-        st.session_state.temp_selected_rooms = []
+    # Загружаем данные из файла судьи
+    load_judge_data()
     
     # Получаем данные
     p1 = st.session_state.get("p1", {})
@@ -2312,12 +2509,19 @@ def judge_interface():
         st.write(f"**Готовность:** {'✅ Готов' if p1.get('ready') else '⏳ Ожидание'}")
         st.write(f"**Этап:** {get_stage_name(p1.get('stage', 'resources'))}")
         
-        with st.expander("📋 Детальный статус этапов"):
-            st.write(f"Закупка ресурсов: {'✅' if p1.get('finished_resources') else '⏳'}")
+        with st.expander("📋 Детальный статус"):
+            st.write(f"Закупка: {'✅' if p1.get('finished_resources') else '⏳'}")
             st.write(f"Выбор оперативников: {'✅' if p1.get('finished_available') else '⏳'}")
             st.write(f"Защита: {'✅' if p1.get('finished_protection') else '⏳'}")
             st.write(f"Баны: {'✅' if p1.get('finished_bans') else '⏳'}")
             st.write(f"Пики: {'✅' if p1.get('finished_picks') else '⏳'}")
+        
+        available = p1.get("available_heroes", [])
+        st.write(f"**Оперативников:** {len(available)}")
+        protected = p1.get("protected_heroes", [])
+        st.write(f"**Защищено:** {len(protected)}")
+        banned = p1.get("bans", {}).get("opponent_bans", [])
+        st.write(f"**Забанено:** {len(banned)}")
     
     with col2:
         st.markdown("### ⚔️ Участник 2")
@@ -2326,98 +2530,112 @@ def judge_interface():
         st.write(f"**Готовность:** {'✅ Готов' if p2.get('ready') else '⏳ Ожидание'}")
         st.write(f"**Этап:** {get_stage_name(p2.get('stage', 'resources'))}")
         
-        with st.expander("📋 Детальный статус этапов"):
-            st.write(f"Закупка ресурсов: {'✅' if p2.get('finished_resources') else '⏳'}")
+        with st.expander("📋 Детальный статус"):
+            st.write(f"Закупка: {'✅' if p2.get('finished_resources') else '⏳'}")
             st.write(f"Выбор оперативников: {'✅' if p2.get('finished_available') else '⏳'}")
             st.write(f"Защита: {'✅' if p2.get('finished_protection') else '⏳'}")
             st.write(f"Баны: {'✅' if p2.get('finished_bans') else '⏳'}")
             st.write(f"Пики: {'✅' if p2.get('finished_picks') else '⏳'}")
+        
+        available = p2.get("available_heroes", [])
+        st.write(f"**Оперативников:** {len(available)}")
+        protected = p2.get("protected_heroes", [])
+        st.write(f"**Защищено:** {len(protected)}")
+        banned = p2.get("bans", {}).get("opponent_bans", [])
+        st.write(f"**Забанено:** {len(banned)}")
     
     st.divider()
     
-    # Кнопки управления
-    col_advance, col_reset, col_refresh = st.columns(3)
+    # Кнопки управления этапами
+    col_advance, col_waiting, col_reset = st.columns(3)
     
     with col_advance:
+        # Переход по этапам (resources -> available -> protection -> bans -> picks)
         if p1.get("ready") and p2.get("ready"):
             current_stage = p1.get("stage", "resources")
-            next_stage = get_next_stage(current_stage)
             
             can_advance = False
             if current_stage == "resources":
                 can_advance = p1.get("finished_resources") and p2.get("finished_resources")
+                next_stage = "available"
             elif current_stage == "available":
                 can_advance = p1.get("finished_available") and p2.get("finished_available")
+                next_stage = "protection"
             elif current_stage == "protection":
                 can_advance = p1.get("finished_protection") and p2.get("finished_protection")
+                next_stage = "bans"
             elif current_stage == "bans":
                 can_advance = p1.get("finished_bans") and p2.get("finished_bans")
-            elif current_stage == "picks":
-                can_advance = p1.get("finished_picks") and p2.get("finished_picks")
+                next_stage = "picks"
+            else:
+                can_advance = False
+                next_stage = current_stage
             
-            if can_advance:
-                # Особый случай: переход на этап выбора оперативников
-                if next_stage == "available":
-                    if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn_available", use_container_width=True, type="primary"):
-                        # Переводим участников на следующий этап
-                        p1["stage"] = next_stage
-                        p2["stage"] = next_stage
+            if can_advance and next_stage != current_stage:
+                if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn", use_container_width=True, type="primary"):
+                    p1["stage"] = next_stage
+                    p2["stage"] = next_stage
+                    
+                    # Сбрасываем флаги для нового этапа
+                    if next_stage == "available":
                         p1["finished_available"] = False
                         p2["finished_available"] = False
-                        
-                        st.session_state.p1 = p1
-                        st.session_state.p2 = p2
-                        
-                        save_player_data(1)
-                        save_player_data(2)
-                        
-                        judge_state = {
-                            "p1": st.session_state.p1,
-                            "p2": st.session_state.p2,
-                            "selected_rooms": st.session_state.get("temp_selected_rooms", [])
-                        }
-                        with open(JUDGE_FILE, "w", encoding="utf-8") as f:
-                            json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
-                        
-                        # Переключаем судью в режим выбора комнат
-                        st.session_state.rooms_selection_mode = True
-                        st.rerun()
-                else:
-                    if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn_other", use_container_width=True, type="primary"):
-                        p1["stage"] = next_stage
-                        p2["stage"] = next_stage
-                        
-                        if next_stage == "protection":
-                            p1["finished_protection"] = False
-                            p2["finished_protection"] = False
-                        elif next_stage == "bans":
-                            p1["finished_bans"] = False
-                            p2["finished_bans"] = False
-                        elif next_stage == "picks":
-                            p1["finished_picks"] = False
-                            p2["finished_picks"] = False
-                        
-                        st.session_state.p1 = p1
-                        st.session_state.p2 = p2
-                        
-                        save_player_data(1)
-                        save_player_data(2)
-                        
-                        judge_state = {
-                            "p1": st.session_state.p1,
-                            "p2": st.session_state.p2,
-                            "selected_rooms": st.session_state.get("temp_selected_rooms", [])
-                        }
-                        with open(JUDGE_FILE, "w", encoding="utf-8") as f:
-                            json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
-                        
-                        st.success(f"✅ Переход на этап {get_stage_name(next_stage)} выполнен!")
-                        time.sleep(1)
-                        st.rerun()
+                    elif next_stage == "protection":
+                        p1["finished_protection"] = False
+                        p2["finished_protection"] = False
+                    elif next_stage == "bans":
+                        p1["finished_bans"] = False
+                        p2["finished_bans"] = False
+                    elif next_stage == "picks":
+                        p1["finished_picks"] = False
+                        p2["finished_picks"] = False
+                    
+                    st.session_state.p1 = p1
+                    st.session_state.p2 = p2
+                    save_player_data(1)
+                    save_player_data(2)
+                    save_judge_data()
+                    
+                    st.success(f"✅ Переход на {get_stage_name(next_stage)} выполнен!")
+                    time.sleep(1)
+                    st.rerun()
             else:
-                st.info(f"⏳ Ожидание завершения этапа {get_stage_name(current_stage)}...")
+                st.info(f"⏳ {get_stage_name(current_stage)}...")
         else:
-            st.info("⏳ Ожидание готовности обоих участников...")
+            st.info("⏳ Ожидание готовности...")
+    
+    with col_waiting:
+        # Отправка в комнату ожидания (после пиков)
+        if p1.get("finished_picks") and p2.get("finished_picks"):
+            if p1.get("stage") != "waiting_room" and p2.get("stage") != "waiting_room":
+                if st.button("🏨 В комнату ожидания", key="to_waiting", use_container_width=True, type="primary"):
+                    p1["stage"] = "waiting_room"
+                    p2["stage"] = "waiting_room"
+                    st.session_state.p1 = p1
+                    st.session_state.p2 = p2
+                    save_player_data(1)
+                    save_player_data(2)
+                    save_judge_data()
+                    st.success("✅ Участники в комнате ожидания!")
+                    st.rerun()
+            else:
+                st.success("✅ Участники в комнате ожидания")
+                
+                # ========== ЗДЕСЬ КНОПКА НАЧАЛА БОЁВ ==========
+                if st.button("⚔️ НАЧАТЬ БОИ", key="start_battle", use_container_width=True, type="primary"):
+                    p1["stage"] = "battle"
+                    p2["stage"] = "battle"
+                    st.session_state.p1 = p1
+                    st.session_state.p2 = p2
+                    save_player_data(1)
+                    save_player_data(2)
+                    save_judge_data()
+                    st.success("⚔️ БОИ НАЧАЛИСЬ! ⚔️")
+                    st.balloons()
+                    time.sleep(2)
+                    st.rerun()
+        else:
+            st.info("⏳ Ожидание завершения пиков")
     
     with col_reset:
         if st.button("🔄 Сбросить всё", key="reset_all_btn", use_container_width=True):
@@ -2426,104 +2644,45 @@ def judge_interface():
             st.session_state.temp_selected_rooms = []
             save_player_data(1)
             save_player_data(2)
-            
-            judge_state = {
-                "p1": st.session_state.p1,
-                "p2": st.session_state.p2,
-                "selected_rooms": []
-            }
-            with open(JUDGE_FILE, "w", encoding="utf-8") as f:
-                json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
-            
+            save_judge_data()
             st.success("Турнир сброшен!")
-            time.sleep(1)
-            st.rerun()
-    
-    with col_refresh:
-        if st.button("🔄 Обновить отображение", key="refresh_btn", use_container_width=True):
-            if os.path.exists(JUDGE_FILE):
-                try:
-                    with open(JUDGE_FILE, "r", encoding="utf-8") as f:
-                        judge_data = json.load(f)
-                        for key, value in judge_data.get("p1", {}).items():
-                            st.session_state.p1[key] = value
-                        for key, value in judge_data.get("p2", {}).items():
-                            st.session_state.p2[key] = value
-                        if "selected_rooms" in judge_data:
-                            st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
-                    st.success("Данные обновлены из judge_data.json!")
-                except Exception as e:
-                    st.error(f"Ошибка: {e}")
-            else:
-                st.warning("Файл judge_data.json не найден. Нажмите 'Собрать данные участников' сначала.")
-            time.sleep(0.5)
             st.rerun()
     
     st.divider()
     
-    # ========== ИНФОРМАЦИЯ О ВЫБРАННЫХ КОМНАТАХ ==========
+    # Информация о выбранных комнатах
     with st.expander("🏠 Выбранные комнаты", expanded=False):
-        if os.path.exists(JUDGE_FILE):
-            try:
-                with open(JUDGE_FILE, "r", encoding="utf-8") as f:
-                    judge_data = json.load(f)
-                    selected_rooms = judge_data.get("selected_rooms", [])
-                    if selected_rooms:
-                        st.success("### ✅ Выбранные комнаты (в порядке использования):")
-                        for idx, room in enumerate(selected_rooms, 1):
-                            st.write(f"{idx}. Комната {room}")
-                    else:
-                        st.info("Комнаты еще не выбраны")
-            except:
-                st.info("Комнаты еще не выбраны")
+        selected_rooms = get_selected_rooms()
+        if selected_rooms:
+            for idx, room in enumerate(selected_rooms, 1):
+                st.write(f"{idx}. Комната {room}")
         else:
-            st.info("Комнаты еще не выбраны")
+            st.info("Комнаты не выбраны")
     
-    # Информация о ресурсах участников
-    with st.expander("💰 Информация о ресурсах участников", expanded=False):
+    # Информация о ресурсах
+    with st.expander("💰 Ресурсы участников", expanded=False):
         col1, col2 = st.columns(2)
-        
         with col1:
             st.markdown(f"**{p1.get('nickname', 'Участник 1')}**")
             resources = p1.get("resources", {})
-            for res_name, count in resources.items():
+            for name, count in resources.items():
                 if count > 0:
-                    st.write(f"{res_name}: {count}")
-            st.write(f"💎 Осталось Увыкоинов: {p1.get('points', 12)}")
-        
+                    st.write(f"{name}: {count}")
         with col2:
             st.markdown(f"**{p2.get('nickname', 'Участник 2')}**")
             resources = p2.get("resources", {})
-            for res_name, count in resources.items():
+            for name, count in resources.items():
                 if count > 0:
-                    st.write(f"{res_name}: {count}")
-            st.write(f"💎 Осталось Увыкоинов: {p2.get('points', 12)}")
+                    st.write(f"{name}: {count}")
     
     # Информация о ключах
-    with st.expander("ℹ️ Информация о ключах доступа", expanded=False):
+    with st.expander("ℹ️ Ключи доступа", expanded=False):
         st.markdown("""
-        ### 🔑 Ключи доступа для участников:
-        
-        | Роль | Ключ доступа |
-        |------|-------------|
+        | Роль | Ключ |
+        |------|------|
         | 🎮 Участник 1 | `player1_2024` |
         | 🎮 Участник 2 | `player2_2024` |
         | ⚖️ Судья | `judge_2024` |
-        
-        ### 📁 Файлы данных:
-        - `player1_data.json` - данные Участника 1
-        - `player2_data.json` - данные Участника 2
-        - `judge_data.json` - синхронизированные данные (судья)
-        
-        ### 🔄 Как обновить данные:
-        1. Участники нажимают кнопки сохранения в своих интерфейсах
-        2. Судья нажимает **"📥 Собрать данные участников"**
-        3. Данные загружаются из файлов участников и сохраняются в `judge_data.json`
-        4. Судья нажимает **"🔄 Обновить отображение"** для просмотра актуального статуса
-        
-        ### ⚠️ Важно:
-        - Всегда нажимайте **"Собрать данные участников"** перед проверкой статуса
-        - Участники должны нажимать кнопки сохранения после каждого действия
         """)
 
 def rooms_selection_only_interface():
@@ -2631,6 +2790,265 @@ def rooms_selection_only_interface():
         else:
             st.button("✅ Подтвердить и продолжить", disabled=True, use_container_width=True)
             st.caption(f"⚠️ Нужно выбрать 3 комнаты (выбрано {len(st.session_state.temp_selected_rooms)})")
+
+
+# ========== 10. ИНТЕРФЕЙС БОЯ ==========
+
+def battle_interface():
+    """Интерфейс этапа боя для судьи"""
+    
+    st.markdown("## ⚔️ ЭТАП БОЯ ⚔️")
+    st.caption("Фиксация результатов реальных сражений в игре")
+    
+    # Загружаем данные
+    load_judge_data()
+    
+    p1 = st.session_state.get("p1", {})
+    p2 = st.session_state.get("p2", {})
+    selected_rooms = get_selected_rooms()
+    
+    # Инициализация результатов боёв в session_state
+    if "battle_results" not in st.session_state:
+        st.session_state.battle_results = {}
+        for i in range(3):
+            st.session_state.battle_results[i] = {
+                "winner": None,  # "p1", "p2", "draw"
+                "restart_used_p1": False,
+                "restart_used_p2": False
+            }
+    
+    # Информация об участниках
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"### ⚔️ {p1.get('nickname', 'Участник 1')}")
+        # Отображение пачек участника 1
+        picks_p1 = p1.get("picks", [[None for _ in range(4)] for _ in range(3)])
+        for room_idx in range(3):
+            if room_idx < len(selected_rooms):
+                st.markdown(f"**Комната {selected_rooms[room_idx]}**")
+            else:
+                st.markdown(f"**Комната {room_idx + 1}**")
+            pack = picks_p1[room_idx] if room_idx < len(picks_p1) else []
+            if any(pack):
+                hero_names = []
+                for hero_id in pack:
+                    if hero_id:
+                        hero_info = p1.get("character_db", {}).get(hero_id, {})
+                        hero_names.append(hero_info.get("name", "?"))
+                st.write(" → ".join(hero_names))
+            else:
+                st.write("*пустая пачка*")
+    
+    with col2:
+        st.markdown(f"### ⚔️ {p2.get('nickname', 'Участник 2')}")
+        picks_p2 = p2.get("picks", [[None for _ in range(4)] for _ in range(3)])
+        for room_idx in range(3):
+            if room_idx < len(selected_rooms):
+                st.markdown(f"**Комната {selected_rooms[room_idx]}**")
+            else:
+                st.markdown(f"**Комната {room_idx + 1}**")
+            pack = picks_p2[room_idx] if room_idx < len(picks_p2) else []
+            if any(pack):
+                hero_names = []
+                for hero_id in pack:
+                    if hero_id:
+                        hero_info = p2.get("character_db", {}).get(hero_id, {})
+                        hero_names.append(hero_info.get("name", "?"))
+                st.write(" → ".join(hero_names))
+            else:
+                st.write("*пустая пачка*")
+    
+    st.divider()
+    
+    # ========== ВВОД РЕЗУЛЬТАТОВ БОЁВ ==========
+    st.markdown("### 📋 Результаты комнат")
+    
+    # Получаем ресурсы участников для проверки рестартов
+    resources_p1 = p1.get("resources", {})
+    resources_p2 = p2.get("resources", {})
+    restart_p1 = resources_p1.get("🔄 Рестарт", 0)
+    restart_p2 = resources_p2.get("🔄 Рестарт", 0)
+    
+    # Счёт побед
+    score_p1 = 0
+    score_p2 = 0
+    
+    for room_idx in range(3):
+        room_name = selected_rooms[room_idx] if room_idx < len(selected_rooms) else f"Комната {room_idx + 1}"
+        
+        st.markdown(f"#### {room_name}")
+        
+        result = st.session_state.battle_results[room_idx]
+        current_winner = result["winner"]
+        
+        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+        
+        with col1:
+            st.write("**Победитель:**")
+            winner_options = {
+                None: "— не выбран —",
+                "p1": f"{p1.get('nickname', 'Участник 1')}",
+                "p2": f"{p2.get('nickname', 'Участник 2')}",
+                "draw": "Ничья"
+            }
+            selected_winner = st.selectbox(
+                "Победитель",
+                options=list(winner_options.keys()),
+                format_func=lambda x: winner_options[x],
+                key=f"winner_{room_idx}"
+            )
+            if selected_winner != current_winner:
+                st.session_state.battle_results[room_idx]["winner"] = selected_winner
+                st.rerun()
+        
+        with col2:
+            if current_winner == "p1":
+                st.success("🏆")
+                score_p1 += 1
+            elif current_winner == "p2":
+                st.success("🏆")
+                score_p2 += 1
+            elif current_winner == "draw":
+                st.info("🤝")
+        
+        with col3:
+            # Рестарт для участника 1
+            restart_used = result.get("restart_used_p1", False)
+            if restart_used:
+                st.success("✅ Рестарт использован")
+            else:
+                if restart_p1 > 0:
+                    if st.button(f"🔄 Рестарт ({p1.get('nickname', 'Участник 1')})", key=f"restart_p1_{room_idx}"):
+                        st.session_state.battle_results[room_idx]["restart_used_p1"] = True
+                        # Сбрасываем победителя
+                        st.session_state.battle_results[room_idx]["winner"] = None
+                        # Уменьшаем ресурс рестарта в временных данных
+                        st.session_state[f"temp_restart_update_p1"] = st.session_state.get(f"temp_restart_update_p1", 0) + 1
+                        st.rerun()
+                else:
+                    st.button(f"❌ Нет рестарта", key=f"restart_p1_disabled_{room_idx}", disabled=True)
+        
+        with col4:
+            # Рестарт для участника 2
+            restart_used = result.get("restart_used_p2", False)
+            if restart_used:
+                st.success("✅ Рестарт использован")
+            else:
+                if restart_p2 > 0:
+                    if st.button(f"🔄 Рестарт ({p2.get('nickname', 'Участник 2')})", key=f"restart_p2_{room_idx}"):
+                        st.session_state.battle_results[room_idx]["restart_used_p2"] = True
+                        st.session_state.battle_results[room_idx]["winner"] = None
+                        st.session_state[f"temp_restart_update_p2"] = st.session_state.get(f"temp_restart_update_p2", 0) + 1
+                        st.rerun()
+                else:
+                    st.button(f"❌ Нет рестарта", key=f"restart_p2_disabled_{room_idx}", disabled=True)
+        
+        with col5:
+            # Кнопка сброса результата комнаты
+            if st.button(f"🗑️ Сбросить", key=f"reset_room_{room_idx}"):
+                st.session_state.battle_results[room_idx]["winner"] = None
+                st.rerun()
+        
+        st.divider()
+    
+    # ========== ОТОБРАЖЕНИЕ СЧЁТА ==========
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(f"{p1.get('nickname', 'Участник 1')}", score_p1)
+    with col2:
+        st.metric(f"{p2.get('nickname', 'Участник 2')}", score_p2)
+    with col3:
+        if score_p1 > score_p2:
+            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ведёт Участник 1")
+        elif score_p2 > score_p1:
+            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ведёт Участник 2")
+        else:
+            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ничья")
+    
+    st.divider()
+    
+    # ========== КНОПКИ УПРАВЛЕНИЯ ==========
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # Применяем использованные рестарты к данным участников
+        temp_restart_p1 = st.session_state.get(f"temp_restart_update_p1", 0)
+        temp_restart_p2 = st.session_state.get(f"temp_restart_update_p2", 0)
+        
+        if temp_restart_p1 > 0 or temp_restart_p2 > 0:
+            if st.button("💾 Составить протокол рестартов", key="apply_restarts", use_container_width=True):
+                # Обновляем ресурсы участников в файлах
+                if temp_restart_p1 > 0:
+                    new_restart_p1 = max(0, restart_p1 - temp_restart_p1)
+                    p1["resources"]["🔄 Рестарт"] = new_restart_p1
+                    st.session_state.p1 = p1
+                    save_player_data(1)
+                
+                if temp_restart_p2 > 0:
+                    new_restart_p2 = max(0, restart_p2 - temp_restart_p2)
+                    p2["resources"]["🔄 Рестарт"] = new_restart_p2
+                    st.session_state.p2 = p2
+                    save_player_data(2)
+                
+                # Обновляем файл судьи
+                save_judge_data()
+                
+                st.session_state[f"temp_restart_update_p1"] = 0
+                st.session_state[f"temp_restart_update_p2"] = 0
+                st.success("✅ Рестарты списаны!")
+                st.rerun()
+    
+    with col2:
+        if st.button("🏆 ЗАВЕРШИТЬ ТУРНИР", key="finish_tournament", use_container_width=True, type="primary"):
+            # Проверяем, что все комнаты имеют результат
+            all_rooms_set = all(
+                st.session_state.battle_results[room_idx]["winner"] is not None 
+                for room_idx in range(3)
+            )
+            
+            if not all_rooms_set:
+                st.error("❌ Укажите результаты всех трёх комнат!")
+            else:
+                # Объявляем победителя
+                if score_p1 > score_p2:
+                    winner = p1.get('nickname', 'Участник 1')
+                    st.balloons()
+                    st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {winner}!!! 🏆")
+                elif score_p2 > score_p1:
+                    winner = p2.get('nickname', 'Участник 2')
+                    st.balloons()
+                    st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {winner}!!! 🏆")
+                else:
+                    st.info("🤝 НИЧЬЯ В ТУРНИРЕ!")
+                
+                # Переводим участников на финальный этап
+                p1["stage"] = "finished"
+                p2["stage"] = "finished"
+                st.session_state.p1 = p1
+                st.session_state.p2 = p2
+                save_player_data(1)
+                save_player_data(2)
+                save_judge_data()
+                
+                # Очищаем временные данные
+                if "battle_results" in st.session_state:
+                    del st.session_state.battle_results
+                if "temp_restart_update_p1" in st.session_state:
+                    del st.session_state.temp_restart_update_p1
+                if "temp_restart_update_p2" in st.session_state:
+                    del st.session_state.temp_restart_update_p2
+                
+                st.success("🏆 ТУРНИР ЗАВЕРШЁН! 🏆")
+                time.sleep(3)
+                st.rerun()
+    
+    with col3:
+        if st.button("🔄 Сбросить все результаты", key="reset_all_results", use_container_width=True):
+            for room_idx in range(3):
+                st.session_state.battle_results[room_idx]["winner"] = None
+            st.rerun()
+    
+    st.caption("💡 **Инструкция:** Выберите победителя для каждой комнаты. При необходимости используйте кнопки 'Рестарт' — они спишут ресурс у участника. После заполнения всех комнат нажмите 'Завершить турнир'.")
 
 def get_stage_name(stage_key):
     """Возвращает русское название этапа"""
