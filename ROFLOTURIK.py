@@ -250,7 +250,7 @@ RESOURCES_DB = {
 STARTING_POINTS = 12
 MAX_TOTAL_RESURRECTIONS = 3  # Максимум воскрешений (Универсальное + 5⭐) не более 3
 MAX_BAN_4_5 = 2  # Максимум Бана 4-5⭐ не более 2
-MAX_RESTART = 2  # Максимум Рестарта не более 2
+MAX_RESTART = 3  # Максимум Рестарта не более 2
 
 
 PLAYER1_FILE = "player1_data.json"
@@ -307,49 +307,53 @@ def load_opponent_data(player_num):
     return False
 
 def save_judge_data():
-    """Судья собирает данные обоих участников и сохраняет в свой файл"""
-    # Загружаем последние данные участников из их файлов
-    if os.path.exists(PLAYER1_FILE):
+    """Сохраняет данные судьи, включая комнаты и результаты банов"""
+    
+    # Загружаем старые данные, чтобы не потерять комнаты и баны
+    old_selected_rooms = []
+    old_ban_results = {}
+    
+    if os.path.exists(JUDGE_FILE):
         try:
-            with open(PLAYER1_FILE, "r", encoding="utf-8") as f:
-                p1_data = json.load(f)
-                st.session_state.p1 = p1_data
+            with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                old_data = json.load(f)
+                old_selected_rooms = old_data.get("selected_rooms", [])
+                old_ban_results = old_data.get("ban_results", {})
         except:
             pass
     
-    if os.path.exists(PLAYER2_FILE):
-        try:
-            with open(PLAYER2_FILE, "r", encoding="utf-8") as f:
-                p2_data = json.load(f)
-                st.session_state.p2 = p2_data
-        except:
-            pass
-    
-    # Сохраняем в файл судьи
+    # Сохраняем всё вместе
     judge_state = {
         "p1": st.session_state.p1,
-        "p2": st.session_state.p2
+        "p2": st.session_state.p2,
+        "selected_rooms": st.session_state.get("temp_selected_rooms", old_selected_rooms),
+        "ban_results": st.session_state.get("ban_results", old_ban_results)
     }
+    
     with open(JUDGE_FILE, "w", encoding="utf-8") as f:
         json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
     
     return True
 
 def load_judge_data():
-    """Загружает данные из файла судьи (для судьи или для синхронизации)"""
+    """Загружает данные из файла судьи"""
     if os.path.exists(JUDGE_FILE):
         try:
             with open(JUDGE_FILE, "r", encoding="utf-8") as f:
                 judge_data = json.load(f)
-                st.session_state.p1 = judge_data.get("p1", get_empty_participant_data())
-                st.session_state.p2 = judge_data.get("p2", get_empty_participant_data())
+                for key, value in judge_data.get("p1", {}).items():
+                    st.session_state.p1[key] = value
+                for key, value in judge_data.get("p2", {}).items():
+                    st.session_state.p2[key] = value
+                if "selected_rooms" in judge_data:
+                    st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                if "ban_results" in judge_data:
+                    st.session_state.ban_results = judge_data["ban_results"]
                 return True
-        except:
-            pass
+        except Exception as e:
+            print(f"Ошибка загрузки judge_data.json: {e}")
     return False
     
-    st.success("📁 Данные участников и выбранные комнаты сохранены в judge_data.json!")
-    time.sleep(1)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 OPERATORS_DIR = os.path.join(CURRENT_DIR, "Operators")
@@ -413,6 +417,8 @@ def get_empty_participant_data():
         "ready": False,
         "points": STARTING_POINTS,
         "resources": {r: 0 for r in RESOURCES_DB},
+        "purchase_history": {r: 0 for r in RESOURCES_DB},
+        "free_resources_added": False,
         "available_heroes": [],
         "protected_heroes": [],
         "bans": {},
@@ -553,6 +559,28 @@ def participant_interface(player_num):
         # Строка 4: Кнопка обновления
         if is_ready:
             if st.button("🔄 Проверить статус", key=f"refresh_p{player_num}_simple", use_container_width=True):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.success("Статус обновлен!")
@@ -580,6 +608,28 @@ def participant_interface(player_num):
             st.rerun()
     with col3:
         if st.button("🔄 Обновить", key=f"refresh_p{player_num}_main", use_container_width=True):
+            # Загружаем свежие данные из judge_data.json
+            if os.path.exists(JUDGE_FILE):
+                try:
+                    with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                        judge_data = json.load(f)
+                        if player_num == 1:
+                            for key, value in judge_data.get("p1", {}).items():
+                                st.session_state.p1[key] = value
+                            for key, value in judge_data.get("p2", {}).items():
+                                st.session_state.p2[key] = value
+                        else:
+                            for key, value in judge_data.get("p2", {}).items():
+                                st.session_state.p2[key] = value
+                            for key, value in judge_data.get("p1", {}).items():
+                                st.session_state.p1[key] = value
+                        if "selected_rooms" in judge_data:
+                            st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                        if "ban_results" in judge_data:
+                            st.session_state.ban_results = judge_data["ban_results"]
+                except:
+                    pass
+            
             load_my_data(player_num)
             load_opponent_data(player_num)
             st.rerun()
@@ -599,6 +649,28 @@ def participant_interface(player_num):
             st.info("⏳ Ожидайте команду Судьи для перехода на следующий этап.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_resources_{player_num}"):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
@@ -611,6 +683,28 @@ def participant_interface(player_num):
             st.info("⏳ Ожидайте команду Судьи для перехода на следующий этап.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_available_{player_num}"):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
@@ -623,6 +717,28 @@ def participant_interface(player_num):
             st.info("⏳ Ожидайте команду Судьи для перехода на следующий этап.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_protection_{player_num}"):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
@@ -635,6 +751,28 @@ def participant_interface(player_num):
             st.info("⏳ Ожидайте команду Судьи для перехода на следующий этап.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_bans_{player_num}"):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
@@ -647,6 +785,28 @@ def participant_interface(player_num):
             st.info("⏳ Ожидайте команду Судьи для перехода в комнату ожидания.")
             
             if st.button("🔄 Проверить статус", key=f"check_status_picks_{player_num}"):
+                # Загружаем свежие данные из judge_data.json
+                if os.path.exists(JUDGE_FILE):
+                    try:
+                        with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                            judge_data = json.load(f)
+                            if player_num == 1:
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                            else:
+                                for key, value in judge_data.get("p2", {}).items():
+                                    st.session_state.p2[key] = value
+                                for key, value in judge_data.get("p1", {}).items():
+                                    st.session_state.p1[key] = value
+                            if "selected_rooms" in judge_data:
+                                st.session_state.temp_selected_rooms = judge_data["selected_rooms"]
+                            if "ban_results" in judge_data:
+                                st.session_state.ban_results = judge_data["ban_results"]
+                    except:
+                        pass
+                
                 load_my_data(player_num)
                 load_opponent_data(player_num)
                 st.rerun()
@@ -659,13 +819,28 @@ def participant_interface(player_num):
         st.info("⚔️ Ожидайте начала боев от Судьи.")
         
         if st.button("🔄 Проверить статус", key=f"check_status_battle_{player_num}"):
+            if os.path.exists(JUDGE_FILE):
+                try:
+                    with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                        judge_data = json.load(f)
+                        if player_num == 1:
+                            for key, value in judge_data.get("p1", {}).items():
+                                st.session_state.p1[key] = value
+                            for key, value in judge_data.get("p2", {}).items():
+                                st.session_state.p2[key] = value
+                        else:
+                            for key, value in judge_data.get("p2", {}).items():
+                                st.session_state.p2[key] = value
+                            for key, value in judge_data.get("p1", {}).items():
+                                st.session_state.p1[key] = value
+                except:
+                    pass
             load_my_data(player_num)
             load_opponent_data(player_num)
             st.rerun()
     
     elif current_stage == "finished":
         st.success("🏆 ПОЗДРАВЛЯЮ! Турнир завершен!")
-        st.balloons()
 
 # ========== 4. ИНТЕРФЕЙС ЗАКУПОК ==========
 
@@ -856,11 +1031,13 @@ def purchase_interface(player_num):
         elif total_cost == 0 and not any(purchases.values()):
             st.warning("⚠️ Вы ничего не купили")
             if st.button("⏭️ Пропустить закупку", key=f"skip_purchase_{player_num}", use_container_width=True):
-                # Добавляем базовую комплектацию
-                if "🔄 Рестарт" not in current_resources:
-                    current_resources["🔄 Рестарт"] = 1
-                if "🔴 Универсальный бан" not in current_resources:
-                    current_resources["🔴 Универсальный бан"] = 1
+                # Добавляем базовую комплектацию (только один раз)
+                if not data.get("free_resources_added", False):
+                    current_resources["🔄 Рестарт"] = current_resources.get("🔄 Рестарт", 0) + 1
+                    current_resources["🔴 Универсальный бан"] = current_resources.get("🔴 Универсальный бан", 0) + 1
+                    data["free_resources_added"] = True
+                    data["purchase_history"] = current_resources.copy()
+                    st.info("🎁 Добавлены бесплатные ресурсы: 🔄 Рестарт x1, 🔴 Универсальный бан x1")
                 
                 data["resources"] = current_resources
                 data["finished_resources"] = True
@@ -871,7 +1048,7 @@ def purchase_interface(player_num):
                     st.session_state.p2 = data
                 
                 save_player_data(player_num)
-                st.success("✅ Этап закупки пропущен! Ожидайте Судью.")
+                st.success("✅ Этап закупки пропущен! Бесплатные ресурсы добавлены.")
                 st.rerun()
         else:
             if st.button("✅ Подтвердить закупку", key=f"confirm_purchase_{player_num}", type="primary", use_container_width=True):
@@ -888,9 +1065,13 @@ def purchase_interface(player_num):
                         if quantity > 0:
                             current_resources[res_name] = current_resources.get(res_name, 0) + quantity
                     
-                    # Добавляем базовую комплектацию
-                    current_resources["🔄 Рестарт"] = current_resources.get("🔄 Рестарт", 0) + 1
-                    current_resources["🔴 Универсальный бан"] = current_resources.get("🔴 Универсальный бан", 0) + 1
+                    # Добавляем базовую комплектацию (только один раз)
+                    if not data.get("free_resources_added", False):
+                        current_resources["🔄 Рестарт"] = current_resources.get("🔄 Рестарт", 0) + 1
+                        current_resources["🔴 Универсальный бан"] = current_resources.get("🔴 Универсальный бан", 0) + 1
+                        data["free_resources_added"] = True
+                        data["purchase_history"] = current_resources.copy()
+                        st.info("🎁 Добавлены бесплатные ресурсы: 🔄 Рестарт x1, 🔴 Универсальный бан x1")
                     
                     data["points"] = remaining_points
                     data["resources"] = current_resources
@@ -902,8 +1083,7 @@ def purchase_interface(player_num):
                         st.session_state.p2 = data
                     
                     save_player_data(player_num)
-                    st.success("✅ Закупка успешно завершена! Ожидайте Судью.")
-                    st.balloons()
+                    st.success("✅ Закупка успешно завершена!")
                     time.sleep(1)
                     st.rerun()
     
@@ -966,6 +1146,11 @@ def get_modified_character_db_for_player(player_num):
             else:
                 image_name = f"{char_info['name']}.png"
             
+            if char_info["rarity"] in ["5⭐", "4⭐"]:
+                default_potential = 5
+            else:
+                default_potential = 0
+            
             modified_db[char_id] = {
                 "name": char_info["name"],
                 "rarity": char_info["rarity"],
@@ -973,7 +1158,7 @@ def get_modified_character_db_for_player(player_num):
                 "image_path": f"Operators/{image_name}",  # Путь к изображению в папке Operators
                 "has_operator": True,  # ПО УМОЛЧАНИЮ ВСЕ ОПЕРАТИВНИКИ В НАЛИЧИИ
                 "level": 90,  # Уровень по умолчанию
-                "potential": 0,  # Потенциал по умолчанию
+                "potential": default_potential,  # Потенциал по умолчанию
                 "is_restricted": False  # Ограничен ли (Увынск)
             }
         
@@ -1063,17 +1248,22 @@ def display_operators_table(character_db, rarity, player_num):
             
             # 5-й столбец: потенциал (0-5)
             with cols[4]:
+                # Устанавливаем потенциал по умолчанию в зависимости от редкости
+                if char_info["rarity"] == "6⭐":
+                    default_potential = char_info.get("potential", 0)
+                else:  # 5⭐ и 4⭐
+                    default_potential = char_info.get("potential", 5)
+
                 potential = st.number_input(
-                    "Пот.",
+                    "Потенциал",
                     min_value=0,
                     max_value=5,
-                    value=char_info["potential"],
+                    value=default_potential,
                     step=1,
                     key=f"potential_{char_id}_{player_num}",
                     label_visibility="collapsed"
                 )
                 char_info["potential"] = potential
-            
             # 6-й столбец: статус
             with cols[5]:
                 if char_info["rarity"] == "6⭐" and potential >= 3:
@@ -1103,8 +1293,9 @@ def operators_selection_interface(player_num):
     
     st.markdown("## 📋 Выбор оперативников")
     st.caption("Отметьте оперативников, которые есть в вашем распоряжении")
-    st.info("💡 По умолчанию все оперативники отмечены как 'В наличии'. Снимите галочку, если оперативника нет в аккаунте.")
-    
+    st.info("💡 По умолчанию все оперативники отмечены как 'В наличии'. Снимите галочку, если оперативника нет на аккаунте.")
+    st.warning("Внимание: заполнение этого этапа лежит на вашей совести. При несоответсвии данных заполненных тут с реальным положением дел, вам будет присвоено техническое поражение (но сейчас только за наличие/отсутсвие оперативника)")
+
     # Получаем модифицированную базу для участника
     character_db = get_modified_character_db_for_player(player_num)
     
@@ -1125,11 +1316,11 @@ def operators_selection_interface(player_num):
     with col3:
         st.metric("4⭐ Оперативники в наличии", f"{selected_4star}")
     
-    st.caption("ℹ️ Вы можете отметить любое количество оперативников - это просто список того, что есть в вашем аккаунте.")
+    st.caption("ℹ️ Вы можете отметить любое количество оперативников - это просто список того, что есть на вашем аккаунте.")
     st.divider()
     
     # Создаем вкладки для разных редкостей
-    tab1, tab2, tab3 = st.tabs(["⭐ 6⭐ Герои", "⭐⭐ 5⭐ Герои", "⭐⭐⭐ 4⭐ Герои"])
+    tab1, tab2, tab3 = st.tabs(["6⭐ Герои", "5⭐ Герои", "4⭐ Герои"])
     
     with tab1:
         st.markdown("### 6⭐ Оперативники")
@@ -1167,7 +1358,6 @@ def operators_selection_interface(player_num):
             
             save_player_data(player_num)
             st.success(f"✅ Отмечено {len(selected_heroes)} оперативников (6⭐: {selected_6star}, 5⭐: {selected_5star}, 4⭐: {selected_4star})!")
-            st.balloons()
             time.sleep(1)
             st.rerun()
     
@@ -1205,15 +1395,14 @@ def protection_interface(player_num):
         data = st.session_state.p2
         opponent_data = st.session_state.p1
     
-    st.markdown("## 🛡️ Этап защиты оперативников")
-    
+
     # Получаем ресурсы участника
     resources = data.get("resources", {})
-    universal_protection_initial = resources.get("🛡️ Универсальная защита", 0)  # Сколько было куплено
-    five_star_protection_initial = resources.get("🔵 Защита 5⭐", 0)
+    universal_protection = resources.get("🛡️ Универсальная защита", 0)
+    five_star_protection = resources.get("🔵 Защита 5⭐", 0)
     
     # ========== ПОЛНАЯ ИНФОРМАЦИЯ О ЗАКУПКАХ ==========
-    st.markdown("### 📊 Полная информация о закупках ресурсов")
+    st.markdown("### 📊 Список ресурсов у участников")
     
     all_resources = [
         "🛡️ Универсальная защита",
@@ -1229,36 +1418,16 @@ def protection_interface(player_num):
     
     with col1:
         st.markdown(f"**{data.get('nickname', 'Участник 1')}**")
-        st.markdown("**🎁 Бесплатно:** 🔄 Рестарт x1, 🔴 Универсальный бан x1")
-        st.markdown("**💰 Куплено:**")
-        for res in all_resources:
-            count = resources.get(res, 0)
-            if res in ["🔄 Рестарт", "🔴 Универсальный бан"]:
-                purchased = max(0, count - 1)
-                if purchased > 0:
-                    st.write(f"{res}: {purchased}")
-            else:
-                if count > 0:
-                    st.write(f"{res}: {count}")
-        remaining_points = data.get("points", STARTING_POINTS)
-        st.markdown(f"💎 Осталось Увыкоинов: {remaining_points}")
-    
+        history = data.get("purchase_history", {})
+        for name, count in history.items():
+            if count > 0:
+                st.write(f"{name}: {count}")
     with col2:
         st.markdown(f"**{opponent_data.get('nickname', 'Участник 2')}**")
-        st.markdown("**🎁 Бесплатно:** 🔄 Рестарт x1, 🔴 Универсальный бан x1")
-        st.markdown("**💰 Куплено:**")
-        opponent_resources = opponent_data.get("resources", {})
-        for res in all_resources:
-            count = opponent_resources.get(res, 0)
-            if res in ["🔄 Рестарт", "🔴 Универсальный бан"]:
-                purchased = max(0, count - 1)
-                if purchased > 0:
-                    st.write(f"{res}: {purchased}")
-            else:
-                if count > 0:
-                    st.write(f"{res}: {count}")
-        opponent_remaining_points = opponent_data.get("points", STARTING_POINTS)
-        st.markdown(f"💎 Осталось Увыкоинов: {opponent_remaining_points}")
+        history = opponent_data.get("purchase_history", {})
+        for name, count in history.items():
+            if count > 0:
+                st.write(f"{name}: {count}")
     
     st.divider()
     
@@ -1272,7 +1441,7 @@ def protection_interface(player_num):
         st.divider()
 
     # Проверяем, есть ли вообще ресурсы для защиты
-    if universal_protection_initial == 0 and five_star_protection_initial == 0:
+    if universal_protection == 0 and five_star_protection == 0:
         st.error("❌ У вас нет ресурсов для защиты оперативников!")
         
         if st.button("✅ Пропустить этап защиты", key=f"skip_protection_{player_num}", type="primary"):
@@ -1300,9 +1469,9 @@ def protection_interface(player_num):
     if f"protected_temp_{player_num}" not in st.session_state:
         st.session_state[f"protected_temp_{player_num}"] = data.get("protected_heroes", []).copy()
     if f"universal_temp_{player_num}" not in st.session_state:
-        st.session_state[f"universal_temp_{player_num}"] = universal_protection_initial
+        st.session_state[f"universal_temp_{player_num}"] = universal_protection
     if f"five_star_temp_{player_num}" not in st.session_state:
-        st.session_state[f"five_star_temp_{player_num}"] = five_star_protection_initial
+        st.session_state[f"five_star_temp_{player_num}"] = five_star_protection
     
     protected_heroes = st.session_state[f"protected_temp_{player_num}"]
     remaining_universal = st.session_state[f"universal_temp_{player_num}"]
@@ -1314,7 +1483,7 @@ def protection_interface(player_num):
     # Вкладка 6⭐ - проверяем НЕ остаток, а БЫЛ ЛИ КУПЛЕН ресурс
     with tab1:
         # Проверяем, покупал ли участник универсальную защиту (по начальному значению)
-        if universal_protection_initial == 0:
+        if universal_protection == 0:
             st.warning("🔒 Вы не покупали 🛡️ Универсальную защиту. Защита 6⭐ недоступна.")
         elif not six_star_heroes:
             st.info("Нет 6⭐ оперативников.")
@@ -1388,13 +1557,13 @@ def protection_interface(player_num):
             protected_other_count = len(protected_other_ids)
             
             # Сколько защит 5⭐ использовано (не больше чем было)
-            used_five_star = min(protected_other_count, five_star_protection_initial)
+            used_five_star = min(protected_other_count, five_star_protection)
             # Сколько универсальных защит использовано на 5-4⭐
-            used_universal_on_other = max(0, protected_other_count - five_star_protection_initial)
+            used_universal_on_other = max(0, protected_other_count - five_star_protection)
             
             # Остаток ресурсов
-            remaining_five_star = five_star_protection_initial - used_five_star
-            remaining_universal = universal_protection_initial - used_universal_on_six - used_universal_on_other
+            remaining_five_star = five_star_protection - used_five_star
+            remaining_universal = universal_protection - used_universal_on_six - used_universal_on_other
             
             # Обновляем временные переменные
             st.session_state[f"five_star_temp_{player_num}"] = remaining_five_star
@@ -1437,7 +1606,7 @@ def protection_interface(player_num):
                                     protected_heroes.remove(char_id)
                                     # Определяем какой ресурс возвращать
                                     # Если количество защищенных 5-4⭐ больше чем было защит 5⭐, то последние использовали универсальную
-                                    if len(protected_other_ids) > five_star_protection_initial:
+                                    if len(protected_other_ids) > five_star_protection:
                                         remaining_universal += 1
                                     else:
                                         remaining_five_star += 1
@@ -1510,15 +1679,14 @@ def protection_interface(player_num):
             del st.session_state[f"five_star_temp_{player_num}"]
             
             st.success(f"✅ Защищено {len(protected_heroes)} оперативников!")
-            st.balloons()
             time.sleep(1)
             st.rerun()
     
     with col_btn2:
         if st.button("🔄 Сбросить все защиты", key=f"reset_{player_num}", use_container_width=True):
             st.session_state[f"protected_temp_{player_num}"] = []
-            st.session_state[f"universal_temp_{player_num}"] = universal_protection_initial
-            st.session_state[f"five_star_temp_{player_num}"] = five_star_protection_initial
+            st.session_state[f"universal_temp_{player_num}"] = universal_protection
+            st.session_state[f"five_star_temp_{player_num}"] = five_star_protection
             st.rerun()
 
 # ========== 6. ИНТЕРФЕЙС БАНА  ==========
@@ -1528,7 +1696,6 @@ def ban_interface(player_num):
     
     # Загружаем свои данные
     load_my_data(player_num)
-    # Загружаем данные противника из файла судьи
     load_opponent_data(player_num)
     
     if player_num == 1:
@@ -1540,18 +1707,9 @@ def ban_interface(player_num):
     
     st.markdown("## 🔨 Этап банов оперативников")
     st.markdown(f"Вы баните оперативников **{opponent_data.get('nickname', 'Противника')}**")
-    
-    # Получаем ресурсы участника для банов
-    resources = data.get("resources", {})
-    universal_ban_initial = resources.get("🔴 Универсальный бан", 0)
-    five_star_ban_initial = resources.get("🔵 Бан 4-5⭐", 0)
-    
-    # Базовая комплектация: 1 универсальный бан бесплатно
-    if universal_ban_initial > 0:
-        universal_ban_initial = universal_ban_initial  # уже включает бесплатный
-    
+    st.divider()
     # ========== ПОЛНАЯ ИНФОРМАЦИЯ О ЗАКУПКАХ ==========
-    st.markdown("### 📊 Полная информация о закупках ресурсов")
+    st.markdown("### 📊 Список ресурсов у участников")
     
     all_resources = [
         "🛡️ Универсальная защита",
@@ -1567,39 +1725,19 @@ def ban_interface(player_num):
     
     with col1:
         st.markdown(f"**{data.get('nickname', 'Участник 1')}**")
-        st.markdown("**🎁 Бесплатно:** 🔄 Рестарт x1, 🔴 Универсальный бан x1")
-        st.markdown("**💰 Куплено:**")
-        for res in all_resources:
-            count = resources.get(res, 0)
-            if res in ["🔄 Рестарт", "🔴 Универсальный бан"]:
-                purchased = max(0, count - 1)
-                if purchased > 0:
-                    st.write(f"{res}: {purchased}")
-            else:
-                if count > 0:
-                    st.write(f"{res}: {count}")
-        remaining_points = data.get("points", STARTING_POINTS)
-        st.markdown(f"💎 Осталось Увыкоинов: {remaining_points}")
-    
+        history = data.get("purchase_history", {})
+        for name, count in history.items():
+            if count > 0:
+                st.write(f"{name}: {count}")
     with col2:
         st.markdown(f"**{opponent_data.get('nickname', 'Участник 2')}**")
-        st.markdown("**🎁 Бесплатно:** 🔄 Рестарт x1, 🔴 Универсальный бан x1")
-        st.markdown("**💰 Куплено:**")
-        opponent_resources = opponent_data.get("resources", {})
-        for res in all_resources:
-            count = opponent_resources.get(res, 0)
-            if res in ["🔄 Рестарт", "🔴 Универсальный бан"]:
-                purchased = max(0, count - 1)
-                if purchased > 0:
-                    st.write(f"{res}: {purchased}")
-            else:
-                if count > 0:
-                    st.write(f"{res}: {count}")
-        opponent_remaining_points = opponent_data.get("points", STARTING_POINTS)
-        st.markdown(f"💎 Осталось Увыкоинов: {opponent_remaining_points}")
+        history = opponent_data.get("purchase_history", {})
+        for name, count in history.items():
+            if count > 0:
+                st.write(f"{name}: {count}")
     
     st.divider()
-    
+
     # ========== ИНФОРМАЦИЯ О ВЫБРАННЫХ КОМНАТАХ ==========
     selected_rooms = get_selected_rooms()
     if selected_rooms:
@@ -1608,267 +1746,296 @@ def ban_interface(player_num):
         for idx, room in enumerate(selected_rooms, 1):
             st.markdown(f"**Комната {room}**")
         st.divider()
-
-    # Проверяем, есть ли вообще ресурсы для банов
-    if universal_ban_initial == 0 and five_star_ban_initial == 0:
-        st.error("❌ У вас нет ресурсов для банов оперативников!")
-        
-        if st.button("✅ Пропустить этап банов", key=f"skip_ban_{player_num}", type="primary"):
-            data["bans"] = {"opponent_bans": []}
+    
+    # Получаем ресурсы для банов
+    resources = data.get("resources", {})
+    universal_ban_count = resources.get("🔴 Универсальный бан", 0)
+    five_star_ban_count = resources.get("🔵 Бан 4-5⭐", 0)
+    
+    # Защита (своя и противника)
+    my_protected = data.get("protected_heroes", [])
+    opponent_protected = opponent_data.get("protected_heroes", [])
+    
+    # Получаем доступных оперативников противника
+    opponent_character_db = opponent_data.get("character_db", {})
+    opponent_available = []
+    for char_id, char_info in opponent_character_db.items():
+        if char_info.get("has_operator", False):
+            opponent_available.append(char_id)
+    
+    if not opponent_available:
+        st.warning("⚠️ У противника нет доступных оперативников!")
+        if st.button("✅ Завершить этап банов", key=f"finish_bans_empty_{player_num}"):
             data["finished_bans"] = True
+            data["bans"] = {}
             save_player_data(player_num)
-            st.success("Этап банов пропущен! Ожидайте Судью.")
             st.rerun()
         return
     
-    # Получаем список оперативников ПРОТИВНИКА
-    opponent_character_db = opponent_data.get("character_db", {})
+    if universal_ban_count == 0 and five_star_ban_count == 0:
+        st.info("ℹ️ У вас нет ресурсов для банов.")
+        if st.button("✅ Завершить этап банов", key=f"finish_bans_no_resources_{player_num}"):
+            data["finished_bans"] = True
+            data["bans"] = {}
+            save_player_data(player_num)
+            st.rerun()
+        return
     
-    # Разделяем оперативников противника по редкости
-    # Также учитываем защиту противника - забаненного оперативника нельзя защитить, но банить можно
-    six_star_enemies = []
-    other_enemies = []
+    # Временное хранилище
+    temp_key = f"temp_bans_{player_num}"
+    if temp_key not in st.session_state:
+        existing = data.get("bans", {})
+        st.session_state[temp_key] = existing.copy() if existing else {}
     
-    for char_id, char_info in opponent_character_db.items():
-        if char_info.get("has_operator", False):
-            # Проверяем, защитил ли противник этого оперативника
-            is_protected = char_id in opponent_data.get("protected_heroes", [])
+    current_bans = st.session_state[temp_key]
+    
+    # Функции-помощники
+    def get_hero_rarity_from_id(hero_id):
+        char_info = opponent_character_db.get(hero_id, {})
+        return char_info.get("rarity", "4⭐")
+    
+    # Подсчёт ресурсов
+    def get_usage_stats(bans_dict):
+        total_bans = sum(bans_dict.values())
+        bans_on_6star = sum(count for hid, count in bans_dict.items() if get_hero_rarity_from_id(hid) == "6⭐")
+        
+        universal_used = bans_on_6star
+        remaining_universal = universal_ban_count - universal_used
+        five_used = 0
+        remaining_universal_temp = remaining_universal
+        
+        for hid, count in bans_dict.items():
+            if get_hero_rarity_from_id(hid) != "6⭐":
+                if five_star_ban_count - five_used > 0:
+                    take = min(count, five_star_ban_count - five_used)
+                    five_used += take
+                    remaining = count - take
+                    if remaining > 0 and remaining_universal_temp > 0:
+                        take_univ = min(remaining, remaining_universal_temp)
+                        remaining_universal_temp -= take_univ
+                else:
+                    if remaining_universal_temp > 0:
+                        take_univ = min(count, remaining_universal_temp)
+                        remaining_universal_temp -= take_univ
+        
+        universal_used_total = universal_ban_count - remaining_universal_temp
+        return universal_used_total, five_used, total_bans
+    
+    def get_remaining(bans_dict):
+        univ_used, five_used, _ = get_usage_stats(bans_dict)
+        return {
+            'univ': universal_ban_count - univ_used,
+            'five': five_star_ban_count - five_used,
+            'total': (universal_ban_count + five_star_ban_count) - sum(bans_dict.values())
+        }
+    
+    def can_add_ban(hero_id, bans_dict, additional=1):
+        hero_rarity = get_hero_rarity_from_id(hero_id)
+        current_count = bans_dict.get(hero_id, 0)
+        new_count = current_count + additional
+        
+        if new_count > 2:
+            return False
+        
+        remaining = get_remaining(bans_dict)
+        if remaining['total'] < additional:
+            return False
+        
+        if hero_rarity == "6⭐":
+            return remaining['univ'] >= additional
+        else:
+            return remaining['five'] > 0 or remaining['univ'] > 0
+    
+    def get_protection_type(hero_id):
+        is_my = hero_id in my_protected
+        is_opp = hero_id in opponent_protected
+        
+        if is_my and is_opp:
+            return "both"
+        elif is_opp:
+            return "opponent"
+        elif is_my:
+            return "mine_only"
+        else:
+            return "none"
+    
+    # Получаем остаток ресурсов для уведомлений
+    remaining = get_remaining(current_bans)
+    
+    st.divider()
+    
+    # Разделяем оперативников (с полной информацией)
+    heroes_6star = []
+    heroes_other = []
+    
+    for hero_id in opponent_available:
+        char_info = opponent_character_db.get(hero_id, {})
+        if char_info.get("rarity") == "6⭐":
+            heroes_6star.append((hero_id, char_info))
+        else:
+            heroes_other.append((hero_id, char_info))
+    
+    # Функция отображения сетки
+    def render_hero_grid(heroes_list, hero_type):
+        if not heroes_list:
+            return
+        
+        items_per_row = 7
+        for i in range(0, len(heroes_list), items_per_row):
+            row = heroes_list[i:i + items_per_row]
+            cols = st.columns(len(row))
             
-            if char_info["rarity"] == "6⭐":
-                six_star_enemies.append((char_id, char_info, is_protected))
-            else:
-                other_enemies.append((char_id, char_info, is_protected))
+            for idx, (hero_id, char_info) in enumerate(row):
+                with cols[idx]:
+                    with st.container(border=True):
+                        hero_name = char_info.get("name", "???")
+                        hero_rarity = char_info.get("rarity", "4⭐")
+                        img_path = load_operator_image(hero_name)
+                        current_count = current_bans.get(hero_id, 0)
+                        protection = get_protection_type(hero_id)
+                        
+                        if img_path:
+                            st.image(img_path, width=80)
+                        else:
+                            st.write("🎴")
+                        
+                        st.markdown(f"**{hero_name}**")
+                        
+                        # Подпись: уровень, потенциал, ранг
+                        rank = 6 if hero_rarity == "6⭐" else (5 if hero_rarity == "5⭐" else 4)
+                        st.caption(f"Lv.{char_info.get('level', 90)} | П{char_info.get('potential', 0)} | {rank}")
+                        
+                        if protection == "both":
+                            st.warning("🛡️🔰 Защищён обоими")
+                        elif protection == "opponent":
+                            st.info("🛡️ Защищён противником")
+                        elif protection == "mine_only":
+                            st.info("🔰 Защищён мною")
+                        
+                        show_second = (protection == "opponent") or (protection == "both")
+                        
+                        # Первый чекбокс
+                        if current_count >= 1:
+                            if current_count >= 2:
+                                ban1_disabled = True
+                            else:
+                                ban1_disabled = False
+                        else:
+                            ban1_disabled = not can_add_ban(hero_id, current_bans, 1)
+                        
+                        ban1 = st.checkbox(
+                            "🔫 Застрелить", 
+                            value=(current_count >= 1), 
+                            key=f"ban1_{hero_type}_{i}_{idx}_{hero_id}",
+                            disabled=ban1_disabled
+                        )
+                        
+                        if show_second:
+                            if current_count >= 2:
+                                ban2_disabled = False
+                            elif current_count == 1:
+                                ban2_disabled = not can_add_ban(hero_id, current_bans, 1)
+                            else:
+                                ban2_disabled = True
+                            
+                            ban2 = st.checkbox(
+                                "💀 Контрольный", 
+                                value=(current_count >= 2), 
+                                key=f"ban2_{hero_type}_{i}_{idx}_{hero_id}",
+                                disabled=ban2_disabled
+                            )
+                            new_count = (1 if ban1 else 0) + (1 if ban2 else 0)
+                        else:
+                            new_count = 1 if ban1 else 0
+                        
+                        if new_count != current_count:
+                            if new_count == 0:
+                                if hero_id in current_bans:
+                                    del current_bans[hero_id]
+                            else:
+                                current_bans[hero_id] = new_count
+                            st.rerun()
     
-    # Получаем уже забаненных (сохраняем в data)
-    current_bans = data.get("bans", {})
-    banned_heroes = current_bans.get("opponent_bans", [])
+    # Вкладки
+    tab1, tab2 = st.tabs(["6⭐ Оперативники противника", "5-4⭐ Оперативники противника"])
     
-    # Временное хранилище для банов
-    if f"bans_temp_{player_num}" not in st.session_state:
-        st.session_state[f"bans_temp_{player_num}"] = banned_heroes.copy()
-    if f"universal_ban_temp_{player_num}" not in st.session_state:
-        st.session_state[f"universal_ban_temp_{player_num}"] = universal_ban_initial
-    if f"five_star_ban_temp_{player_num}" not in st.session_state:
-        st.session_state[f"five_star_ban_temp_{player_num}"] = five_star_ban_initial
-    
-    temp_banned = st.session_state[f"bans_temp_{player_num}"]
-    remaining_universal_ban = st.session_state[f"universal_ban_temp_{player_num}"]
-    remaining_five_star_ban = st.session_state[f"five_star_ban_temp_{player_num}"]
-    
-    # Создаем вкладки
-    tab1, tab2 = st.tabs(["⭐ 6⭐ Оперативники противника", "⭐⭐ 5-4⭐ Оперативники противника"])
-    
-    # Вкладка 6⭐
     with tab1:
-        if universal_ban_initial == 0:
+        if universal_ban_count == 0:
             st.warning("🔒 Вы не покупали 🔴 Универсальный бан. Бан 6⭐ оперативников недоступен.")
-        elif not six_star_enemies:
+        elif not heroes_6star:
             st.info("У противника нет 6⭐ оперативников.")
         else:
-            st.caption(f"🔴 Осталось универсальных банов: {remaining_universal_ban}")
+            remaining_univ = remaining['univ']
             
-            if remaining_universal_ban <= 0 and universal_ban_initial > 0:
-                st.warning("⚠️ Все универсальные баны потрачены. Вы можете снимать баны, но новые добавить нельзя.")
+            if remaining_univ <= 0:
+                st.warning("⚠️ У вас закончились универсальные баны! Вы можете снимать баны, но новые поставить нельзя.")
+            else:
+                st.info(f"🔴 Осталось универсальных банов: {remaining_univ}")
             
-            # Отображаем сеткой по 5 в ряд
-            items_per_row = 5
-            hero_list = six_star_enemies
-            
-            for i in range(0, len(hero_list), items_per_row):
-                row_heroes = hero_list[i:i + items_per_row]
-                cols = st.columns(len(row_heroes))
-                
-                for idx, (char_id, char_info, is_protected) in enumerate(row_heroes):
-                    with cols[idx]:
-                        with st.container(border=True):
-                            # Фото
-                            img = load_operator_image(char_info['name'])
-                            if img:
-                                st.image(img, width=80)
-                            else:
-                                st.write("🎴")
-                            
-                            # Имя и характеристики
-                            st.markdown(f"**{char_info['name']}**")
-                            st.caption(f"{char_info['rarity']} | Lv.{char_info['level']} | П{char_info['potential']}")
-                            
-                            # Статус защиты противника
-                            if is_protected:
-                                st.success("🛡️ Защищен противником")
-                            else:
-                                st.caption("❌ Не защищен")
-                            
-                            # Чекбокс бана
-                            is_banned = char_id in temp_banned
-                            
-                            if is_banned:
-                                if st.checkbox("🔨 Забанен", value=True, key=f"ban6_{char_id}_{player_num}"):
-                                    pass
-                                else:
-                                    # Снимаем бан - возвращаем ресурс (всегда универсальный для 6⭐)
-                                    temp_banned.remove(char_id)
-                                    remaining_universal_ban += 1
-                                    st.session_state[f"bans_temp_{player_num}"] = temp_banned
-                                    st.session_state[f"universal_ban_temp_{player_num}"] = remaining_universal_ban
-                                    st.rerun()
-                            else:
-                                # Кнопка активна только если есть остаток универсальных банов
-                                if remaining_universal_ban <= 0:
-                                    st.checkbox("🔨 Забанить", value=False, disabled=True, key=f"ban6_{char_id}_{player_num}")
-                                    st.caption("❌ Нет банов")
-                                else:
-                                    if st.checkbox("🔨 Забанить", value=False, key=f"ban6_{char_id}_{player_num}"):
-                                        temp_banned.append(char_id)
-                                        remaining_universal_ban -= 1
-                                        st.session_state[f"bans_temp_{player_num}"] = temp_banned
-                                        st.session_state[f"universal_ban_temp_{player_num}"] = remaining_universal_ban
-                                        st.rerun()
+            render_hero_grid(heroes_6star, "6")
     
-    # Вкладка 5-4⭐
     with tab2:
-        if not other_enemies:
+        if not heroes_other:
             st.info("У противника нет 5⭐ или 4⭐ оперативников.")
         else:
-            # Подсчитываем использованные баны
-            banned_other_ids = [h for h in temp_banned if h in [hid for hid, _, _ in other_enemies]]
-            banned_other_count = len(banned_other_ids)
+            remaining_five_val = remaining['five']
+            remaining_univ_val = remaining['univ']
             
-            used_five_star_ban = min(banned_other_count, five_star_ban_initial)
-            remaining_five_star_ban_display = five_star_ban_initial - used_five_star_ban
+            if remaining_five_val == 0 and remaining_univ_val == 0:
+                st.error("❌ У вас закончились все баны! Подтвердите текущий выбор или сбросьте его.")
+            elif remaining_five_val == 0 and remaining_univ_val > 0:
+                st.warning(f"⚠️ У вас закончились баны 5⭐! Будет использован универсальный бан (осталось: {remaining_univ_val})")
+            else:
+                total_bans_left = remaining_five_val + remaining_univ_val
+                st.info(f"📊 **Доступно банов:** {total_bans_left} (🔵 {remaining_five_val} + 🔄 {remaining_univ_val})")
             
-            st.caption(f"🔵 Осталось банов 5⭐: {remaining_five_star_ban_display}")
-            
-            if remaining_five_star_ban_display == 0 and remaining_universal_ban > 0:
-                st.warning(f"⚠️ Баны 5⭐ кончились, будет использован Универсальный бан (осталось: {remaining_universal_ban})")
-            
-            # Отображаем сеткой по 5 в ряд
-            items_per_row = 5
-            hero_list = other_enemies
-            
-            for i in range(0, len(hero_list), items_per_row):
-                row_heroes = hero_list[i:i + items_per_row]
-                cols = st.columns(len(row_heroes))
-                
-                for idx, (char_id, char_info, is_protected) in enumerate(row_heroes):
-                    with cols[idx]:
-                        with st.container(border=True):
-                            # Фото
-                            img = load_operator_image(char_info['name'])
-                            if img:
-                                st.image(img, width=80)
-                            else:
-                                st.write("🎴")
-                            
-                            # Имя и характеристики
-                            st.markdown(f"**{char_info['name']}**")
-                            st.caption(f"{char_info['rarity']} | Lv.{char_info['level']} | П{char_info['potential']}")
-                            
-                            # Статус защиты противника
-                            if is_protected:
-                                st.success("🛡️ Защищен противником")
-                            else:
-                                st.caption("❌ Не защищен")
-                            
-                            # Чекбокс бана
-                            is_banned = char_id in temp_banned
-                            
-                            if is_banned:
-                                if st.checkbox("🔨 Забанен", value=True, key=f"ban5_{char_id}_{player_num}"):
-                                    pass
-                                else:
-                                    # Снимаем бан - определяем какой ресурс возвращать
-                                    # Находим позицию в списке забаненных 5-4⭐
-                                    banned_order = [h for h in temp_banned if h in [hid for hid, _, _ in other_enemies]]
-                                    position = banned_order.index(char_id)
-                                    
-                                    if position < five_star_ban_initial:
-                                        remaining_five_star_ban_display += 1
-                                    else:
-                                        remaining_universal_ban += 1
-                                    
-                                    temp_banned.remove(char_id)
-                                    st.session_state[f"bans_temp_{player_num}"] = temp_banned
-                                    st.session_state[f"five_star_ban_temp_{player_num}"] = remaining_five_star_ban_display
-                                    st.session_state[f"universal_ban_temp_{player_num}"] = remaining_universal_ban
-                                    st.rerun()
-                            else:
-                                # Проверяем доступность бана
-                                can_use_five = remaining_five_star_ban_display > 0
-                                can_use_universal = remaining_universal_ban > 0
-                                
-                                if not can_use_five and not can_use_universal:
-                                    st.checkbox("🔨 Забанить", value=False, disabled=True, key=f"ban5_{char_id}_{player_num}")
-                                    st.caption("❌ Нет банов")
-                                else:
-                                    # Текст кнопки
-                                    if can_use_five:
-                                        button_text = "🔨 Забанить (🔵 5⭐)"
-                                    else:
-                                        button_text = "🔨 Забанить (🔴 Универсальный)"
-                                    
-                                    if st.checkbox(button_text, value=False, key=f"ban5_{char_id}_{player_num}"):
-                                        temp_banned.append(char_id)
-                                        if can_use_five:
-                                            remaining_five_star_ban_display -= 1
-                                        else:
-                                            remaining_universal_ban -= 1
-                                        st.session_state[f"bans_temp_{player_num}"] = temp_banned
-                                        st.session_state[f"five_star_ban_temp_{player_num}"] = remaining_five_star_ban_display
-                                        st.session_state[f"universal_ban_temp_{player_num}"] = remaining_universal_ban
-                                        st.rerun()
+            render_hero_grid(heroes_other, "other")
     
-    # Отображение остатка
-    st.divider()
+    # Итоговая статистика
+    final_bans = st.session_state[temp_key]
+    final_univ, final_five, final_total = get_usage_stats(final_bans)
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        banned_six = len([h for h in temp_banned if h in [hid for hid, _, _ in six_star_enemies]])
-        st.metric("🔨 Забанено 6⭐", banned_six)
+        st.metric("✅ Универсальный бан", f"{final_univ} / {universal_ban_count}")
     with col2:
-        banned_other = len([h for h in temp_banned if h in [hid for hid, _, _ in other_enemies]])
-        st.metric("🔨 Забанено 5-4⭐", banned_other)
+        st.metric("✅ Бан 5⭐", f"{final_five} / {five_star_ban_count}")
     with col3:
-        st.metric("🔴 Универсальных банов осталось", remaining_universal_ban)
-        st.metric("🔵 Банов 5⭐ осталось", remaining_five_star_ban_display)
+        st.metric("✅ Всего банов", f"{final_total} / {universal_ban_count + five_star_ban_count}")
     
-    # Кнопка завершения
+    if final_bans:
+        with st.expander("📋 Выбранные оперативники для бана"):
+            for hid, count in final_bans.items():
+                hero_name = opponent_character_db.get(hid, {}).get("name", "???")
+                st.write(f"- {hero_name}: {count} бан(а)")
+    
+    # Проверка ошибок
+    has_error = False
+    if final_univ > universal_ban_count:
+        st.error("❌ Превышен лимит универсальных банов!")
+        has_error = True
+    if final_five > five_star_ban_count:
+        st.error("❌ Превышен лимит банов 5⭐!")
+        has_error = True
+    
     st.divider()
+    
     col_btn1, col_btn2 = st.columns(2)
     
     with col_btn1:
-        if st.button("✅ Сохранить и завершить баны", key=f"finish_bans_{player_num}", type="primary", use_container_width=True):
-            # Сохраняем баны
-            data["bans"] = {"opponent_bans": temp_banned}
-            data["finished_bans"] = True
-            
-            # Обновляем ресурсы банов
-            data["resources"]["🔴 Универсальный бан"] = remaining_universal_ban
-            data["resources"]["🔵 Бан 4-5⭐"] = remaining_five_star_ban_display
-            
-            if player_num == 1:
-                st.session_state.p1 = data
-            else:
-                st.session_state.p2 = data
-            
-            save_player_data(player_num)
-            
-            # Очищаем временные данные
-            del st.session_state[f"bans_temp_{player_num}"]
-            del st.session_state[f"universal_ban_temp_{player_num}"]
-            del st.session_state[f"five_star_ban_temp_{player_num}"]
-            
-            st.success(f"✅ Забанено {len(temp_banned)} оперативников противника!")
-            st.balloons()
-            time.sleep(1)
+        if st.button("🗑️ ОЧИСТИТЬ ВСЁ", key=f"clear_bans_{player_num}", use_container_width=True):
+            st.session_state[temp_key] = {}
             st.rerun()
     
     with col_btn2:
-        if st.button("🔄 Сбросить все баны", key=f"reset_bans_{player_num}", use_container_width=True):
-            st.session_state[f"bans_temp_{player_num}"] = []
-            st.session_state[f"universal_ban_temp_{player_num}"] = universal_ban_initial
-            st.session_state[f"five_star_ban_temp_{player_num}"] = five_star_ban_initial
+        if st.button("✅ ПОДТВЕРДИТЬ БАНЫ", key=f"confirm_bans_{player_num}", type="primary", use_container_width=True, disabled=has_error):
+            data["bans"] = final_bans.copy()
+            data["finished_bans"] = True
+            save_player_data(player_num)
+            del st.session_state[temp_key]
+            st.success(f"✅ Баны подтверждены! Всего банов: {final_total}")
+            time.sleep(1)
             st.rerun()
-
-
 # ========== 7. ИНТЕРФЕЙС ПИКОВ  ==========
 
 def picks_interface(player_num):
@@ -1889,19 +2056,136 @@ def picks_interface(player_num):
     st.markdown("## ⭐ Этап пиков оперативников")
     st.markdown(f"Формирование пачек для **{data.get('nickname', 'Участника')}**")
     
+    # ========== ИНФОРМАЦИЯ О ВЫБРАННЫХ КОМНАТАХ ==========
+    selected_rooms = get_selected_rooms()
+    if selected_rooms:
+        st.markdown("### 🏟️ Информация о турнире")
+        st.markdown("**Судья подобрал для вас следующие комнаты:**")
+        for idx, room in enumerate(selected_rooms, 1):
+            st.markdown(f"**Комната {room}**")
+        st.divider()
+    
     # Получаем ресурсы воскрешений
     resources = data.get("resources", {})
     universal_resurrection = resources.get("🔴 Универсальное воскрешение", 0)
     five_star_resurrection = resources.get("🔵 Воскрешение 5⭐", 0)
     total_resurrections = universal_resurrection + five_star_resurrection
     
-    # Получаем список доступных оперативников
+
+    # ========== СТАТИСТИКА БАНОВ ==========
+    st.markdown("### 📋 Забаненные для меня оперативники")
+    
+    # Загружаем исходные данные банов из файла судьи
+    p1_bans = {}
+    p2_bans = {}
+    p1_protected = []
+    p2_protected = []
+    
+    if os.path.exists(JUDGE_FILE):
+        try:
+            with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                judge_data = json.load(f)
+                p1_bans = judge_data.get("p1", {}).get("bans", {})
+                p2_bans = judge_data.get("p2", {}).get("bans", {})
+                p1_protected = judge_data.get("p1", {}).get("protected_heroes", [])
+                p2_protected = judge_data.get("p2", {}).get("protected_heroes", [])
+        except:
+            pass
+    
+    # Собираем всех оперативников участника
     character_db = data.get("character_db", {})
+    
+    banned_by_me = []      # 1 категория: только я забанил (и мне недоступен)
+    banned_by_both = []    # 2 категория: забанили оба (и мне недоступен)
+    banned_by_opponent = [] # 3 категория: только противник забанил (и мне недоступен)
+    
+    for hero_id, char_info in character_db.items():
+        if not char_info.get("has_operator", False):
+            continue
+        
+        hero_name = char_info.get("name", "???")
+        
+        # Получаем количество банов от каждого участника
+        if player_num == 1:
+            my_ban_count = p1_bans.get(str(hero_id), 0)
+            opp_ban_count = p2_bans.get(str(hero_id), 0)
+            my_protected = 1 if hero_id in p1_protected else 0
+        else:
+            my_ban_count = p2_bans.get(str(hero_id), 0)
+            opp_ban_count = p1_bans.get(str(hero_id), 0)
+            my_protected = 1 if hero_id in p2_protected else 0
+        
+        total_bans = my_ban_count + opp_ban_count
+        is_available = (total_bans - my_protected) <= 0
+        
+        # Если оперативник НЕ доступен мне
+        if not is_available:
+            if my_ban_count > 0 and opp_ban_count == 0:
+                banned_by_me.append(hero_name)
+            elif my_ban_count > 0 and opp_ban_count > 0:
+                banned_by_both.append(hero_name)
+            elif my_ban_count == 0 and opp_ban_count > 0:
+                banned_by_opponent.append(hero_name)
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**🔴 Забанены мною**")
+        if banned_by_me:
+            for name in banned_by_me:
+                st.write(f"- {name}")
+        else:
+            st.caption("— нет —")
+    
+    with col2:
+        st.markdown("**🟣 Забанены единогласно**")
+        if banned_by_both:
+            for name in banned_by_both:
+                st.write(f"- {name}")
+        else:
+            st.caption("— нет —")
+    
+    with col3:
+        st.markdown("**🔵 Забанены противником**")
+        if banned_by_opponent:
+            for name in banned_by_opponent:
+                st.write(f"- {name}")
+        else:
+            st.caption("— нет —")
+    
+    st.divider()
+    
+    # ========== СТАТИСТИКА ВОСКРЕШЕНИЙ ==========
+    st.markdown("### 🔄 Ресурсы воскрешений")
+    
+    # Получаем запрещённых оперативников (баны от противника)
     opponent_bans = opponent_data.get("bans", {}).get("opponent_bans", [])
     
+    # Получаем результаты банов для доступности
+    ban_results_loaded = {}
+    if os.path.exists(JUDGE_FILE):
+        try:
+            with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                judge_data = json.load(f)
+                ban_results_loaded = judge_data.get("ban_results", {})
+        except:
+            pass
+    
+    p1_ban_results = ban_results_loaded.get("p1", {})
+    p2_ban_results = ban_results_loaded.get("p2", {})
+    
+    if player_num == 1:
+        my_ban_results = p1_ban_results
+    else:
+        my_ban_results = p2_ban_results
+
+    # Получаем список доступных оперативников
     available_heroes = []
     for char_id, char_info in character_db.items():
         if char_info.get("has_operator", False) and char_id not in opponent_bans:
+            is_available = my_ban_results.get(str(char_id), True)
+            if not is_available:
+                continue
             available_heroes.append((char_id, char_info))
     
     # Сортируем по редкости
@@ -1959,7 +2243,8 @@ def picks_interface(player_num):
     remaining_six = max(0, six_limit - repeats_six)
     remaining_total = max(0, five_limit - repeats_total)
     
-    # Отображение статистики
+
+    # Отображение статистики лимитов
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("🔴 Универсальное", universal_resurrection)
@@ -1967,28 +2252,21 @@ def picks_interface(player_num):
         st.metric("🔵 Воскрешение 5⭐", five_star_resurrection)
     with col3:
         if repeats_six > six_limit:
-            st.metric("⭐ 6⭐", f"{repeats_six}/{six_limit}", delta="❌", delta_color="inverse")
+            st.metric("Воскрешено 6⭐", f"{repeats_six}/{six_limit}", delta="!❌!", delta_color="inverse")
         else:
-            st.metric("⭐ 6⭐", f"{repeats_six}/{six_limit}", delta=f"↓{remaining_six}")
+            st.metric("Воскрешено 6⭐", f"{repeats_six}/{six_limit}", delta=f"осталось {remaining_six}")
     with col4:
         if repeats_total > five_limit:
-            st.metric("⭐⭐ 5⭐", f"{repeats_total}/{five_limit}", delta="❌", delta_color="inverse")
+            st.metric("Воскрешено всего", f"{repeats_total}/{five_limit}", delta="!❌!", delta_color="inverse")
         else:
-            st.metric("⭐⭐ 5⭐", f"{repeats_total}/{five_limit}", delta=f"↓{remaining_total}")
+            st.metric("Воскрешено всего", f"{repeats_total}/{five_limit}", delta=f"осталось {remaining_total}")
     
     st.divider()
     
-    # ========== ИНФОРМАЦИЯ О КОМНАТАХ ==========
-    selected_rooms = get_selected_rooms()
-    if selected_rooms:
-        st.markdown("🏟️ **Комнаты:** " + ", ".join(selected_rooms))
-        st.divider()
-    
     # ========== ОСНОВНОЙ ИНТЕРФЕЙС ==========
-    # Левая часть 70%, правая 30%
     left_col, right_col = st.columns([0.65, 0.35])
     
-    # ========== ЛЕВАЯ ЧАСТЬ ==========
+    # ========== ЛЕВАЯ ЧАСТЬ: СПИСОК ОПЕРАТИВНИКОВ ==========
     with left_col:
         st.markdown("### 📋 Оперативники")
         
@@ -1997,90 +2275,109 @@ def picks_interface(player_num):
         else:
             st.warning("⚠️ Сначала выберите пачку")
         
-        # Определяем количество ячеек в строке
-        hero_count = len(available_heroes)
-        items_per_row = 8 if hero_count < 25 else 9
-        
-        hero_list = available_heroes
-        
-        for i in range(0, len(hero_list), items_per_row):
-            row_heroes = hero_list[i:i + items_per_row]
-            cols = st.columns(len(row_heroes))
+        if not available_heroes:
+            st.error("❌ Нет доступных оперативников для выбора!")
+        else:
+            items_per_row = 8
+            hero_list = available_heroes
             
-            for idx, (char_id, char_info) in enumerate(row_heroes):
-                with cols[idx]:
-                    with st.container(border=True):
-                        img = load_operator_image(char_info['name'])
-                        if img:
-                            st.image(img, width=60)
-                        else:
-                            st.write("🎴")
-                        
-                        st.markdown(f"**{char_info['name']}**")
-                        
-                        # Информация: уровень, потенциал, ранг
-                        rank = 6 if char_info["rarity"] == "6⭐" else (5 if char_info["rarity"] == "5⭐" else 4)
-                        st.caption(f"Lv.{char_info['level']} | П{char_info['potential']} | {rank}")
-                        
-                        count = usage_count.get(char_id, 0)
-                        
-                        # Проверка возможности добавления
-                        can_add = True
-                        is_duplicate = False
-                        
-                        if selected_pack is not None:
-                            is_duplicate = char_id in picks[selected_pack]
-                            if is_duplicate:
-                                can_add = False
-                            elif char_info["rarity"] == "6⭐":
-                                if char_id in usage_count:
-                                    new_repeats = repeats_six + 1
-                                else:
-                                    new_repeats = repeats_six
-                                if new_repeats > six_limit:
-                                    can_add = False
-                            elif char_info["rarity"] == "5⭐":
-                                if char_id in usage_count:
-                                    new_repeats_total = repeats_total + 1
-                                else:
-                                    new_repeats_total = repeats_total
-                                if new_repeats_total > five_limit:
-                                    can_add = False
-                        
-                        # Кнопка выбора (только иконка)
-                        if selected_pack is not None:
-                            if is_duplicate:
-                                st.button(f"❌", key=f"hero_{char_id}_{player_num}", disabled=True, use_container_width=True)
-                            elif not can_add:
-                                st.button(f"🚫", key=f"hero_{char_id}_{player_num}", disabled=True, use_container_width=True)
+            for i in range(0, len(hero_list), items_per_row):
+                row_heroes = hero_list[i:i + items_per_row]
+                cols = st.columns(len(row_heroes))
+                
+                for idx, (char_id, char_info) in enumerate(row_heroes):
+                    with cols[idx]:
+                        with st.container(border=True):
+                            img = load_operator_image(char_info['name'])
+                            if img:
+                                st.image(img, width=60)
                             else:
-                                if st.button(f"➕", key=f"hero_{char_id}_{player_num}", use_container_width=True):
-                                    first_empty = None
-                                    for slot_idx in range(4):
-                                        if picks[selected_pack][slot_idx] is None:
-                                            first_empty = slot_idx
-                                            break
+                                st.write("🎴")
+                            
+                            rank = 6 if char_info["rarity"] == "6⭐" else (5 if char_info["rarity"] == "5⭐" else 4)
+                            st.markdown(f"**{char_info['name']}**")
+                            st.caption(f"Lv.{char_info['level']} | П{char_info['potential']} | {rank}")
+                            
+                            count = usage_count.get(char_id, 0)
+                                                        
+                            # Проверка возможности добавления
+                            can_add = True
+                            reason = ""
+                            
+                            if selected_pack is not None:
+                                is_duplicate = char_id in picks[selected_pack]
+                                if is_duplicate:
+                                    can_add = False
+                                else:
+                                    count = usage_count.get(char_id, 0)
+                                                                                                           
+                                    # Расчёты
+                                    total_duplicates = repeats_total
+                                    total_resurrections = universal_resurrection + five_star_resurrection
                                     
-                                    if first_empty is not None:
-                                        picks[selected_pack][first_empty] = char_id
-                                        st.session_state[f"picks_temp_{player_num}"] = picks
-                                        st.success(f"✅ {char_info['name']} добавлен")
-                                        st.rerun()
-                                    else:
-                                        st.error(f"❌ Нет свободных слотов!")
-                        else:
-                            st.button(f"🔒", key=f"hero_disabled_{char_id}_{player_num}", disabled=True, use_container_width=True)
+                                    # Общее условие (для любых дубликатов)
+                                    can_add_duplicate = (total_resurrections - total_duplicates) >= 1
+                                    
+                                    # Дополнительное условие для 6⭐
+                                    can_add_six = (universal_resurrection - repeats_six) >= 1
+                                    
+                                    if char_info["rarity"] == "4⭐":
+                                        can_add = True
+                                    
+                                    elif char_info["rarity"] == "6⭐":
+                                        if count == 0:
+                                            can_add = True
+                                        else:
+                                            # Дубликат 6⭐ требует выполнения ОБОИХ условий
+                                            if can_add_duplicate and can_add_six:
+                                                can_add = True
+                                            else:
+                                                can_add = False
+                                    
+                                    elif char_info["rarity"] == "5⭐":
+                                        if count == 0:
+                                            can_add = True
+                                        else:
+                                            # Дубликат 5⭐ требует только общего условия
+                                            if can_add_duplicate:
+                                                can_add = True
+                                            else:
+                                                can_add = False
+
+                            if selected_pack is not None:
+                                is_duplicate = char_id in picks[selected_pack]
+                                if is_duplicate:
+                                    st.button(f"❌", key=f"hero_dup_{char_id}_{player_num}_{i}_{idx}", disabled=True, use_container_width=True)
+                                elif not can_add:
+                                    st.button(f"🚫", key=f"hero_blocked_{char_id}_{player_num}_{i}_{idx}", disabled=True, use_container_width=True)
+                                
+                                else:
+                                    if st.button(f"➕", key=f"hero_add_{char_id}_{player_num}_{i}_{idx}", use_container_width=True):
+                                        first_empty = None
+                                        for slot_idx in range(4):
+                                            if picks[selected_pack][slot_idx] is None:
+                                                first_empty = slot_idx
+                                                break
+                                        
+                                        if first_empty is not None:
+                                            picks[selected_pack][first_empty] = char_id
+                                            st.session_state[f"picks_temp_{player_num}"] = picks
+                                            st.success(f"✅ {char_info['name']} добавлен")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ УВЫ")
+                            else:
+                                st.button(f"🔒", key=f"hero_disabled_{char_id}_{player_num}_{i}_{idx}", disabled=True, use_container_width=True)
     
-    # ========== ПРАВАЯ ЧАСТЬ ==========
+    # ========== ПРАВАЯ ЧАСТЬ: ТАБЛИЦА ПИКОВ ==========
     with right_col:
         st.markdown("### 🎮 Пачки")
         st.caption("Кнопка: выбор/очистка пачки")
         
         for pack_idx in range(3):
-            cols = st.columns(5)
-            
-            # Получаем комнату для этой пачки (если комнаты выбраны)
             room_for_pack = selected_rooms[pack_idx] if pack_idx < len(selected_rooms) else "?"
+            
+            cols = st.columns(5)
             
             with cols[0]:
                 if selected_pack == pack_idx:
@@ -2108,7 +2405,6 @@ def picks_interface(player_num):
                     with st.container(border=True):
                         if current_hero_id:
                             hero_info = character_db.get(current_hero_id, {})
-                            
                             img = load_operator_image(hero_info.get('name', ''))
                             if img:
                                 st.image(img, width=50)
@@ -2124,7 +2420,6 @@ def picks_interface(player_num):
         
         st.divider()
         
-        # Новая логика: пачка считается готовой, если есть хотя бы один оперативник
         packs_ready = 0
         for pack_idx in range(3):
             if any(picks[pack_idx][slot] is not None for slot in range(4)):
@@ -2134,9 +2429,12 @@ def picks_interface(player_num):
         
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Заполнено слотов", f"{total_filled}/12")
+            st.metric("Всего слотов", "12")
         with col2:
-            st.metric("Готовых пачек", f"{packs_ready}/3")
+            if packs_ready == 3:
+                st.success(f"✅ Пачек готово: {packs_ready}/3")
+            else:
+                st.warning(f"⚠️ Пачек готово: {packs_ready}/3")
     
     # ========== КНОПКИ УПРАВЛЕНИЯ ==========
     st.divider()
@@ -2155,14 +2453,18 @@ def picks_interface(player_num):
     
     with col3:
         if st.button("✅ Сохранить и завершить", key=f"finish_picks_{player_num}", type="primary", use_container_width=True):
-            # Валидация
             errors = []
             
-            # Проверяем, что есть хотя бы одна непустая пачка
-            if packs_ready == 0:
-                errors.append(f"❌ Нужно заполнить хотя бы одну пачку")
+            # ========== НОВАЯ ПРОВЕРКА: В КАЖДОЙ ПАЧКЕ ХОТЯ БЫ 1 ОПЕРАТИВНИК ==========
+            empty_packs = []
+            for pack_idx in range(3):
+                if all(picks[pack_idx][slot] is None for slot in range(4)):
+                    empty_packs.append(pack_idx + 1)
             
-            # Дубликаты в пачках
+            if empty_packs:
+                errors.append(f"❌ Пачка {', '.join(map(str, empty_packs))} пустая. В каждой пачке должен быть хотя бы 1 оперативник!")
+            
+            # ========== ПРОВЕРКА ДУБЛИКАТОВ В ПАЧКАХ ==========
             for pack_idx, pack in enumerate(picks):
                 seen = set()
                 for hero_id in pack:
@@ -2221,7 +2523,6 @@ def picks_interface(player_num):
                 del st.session_state[f"selected_pack_{player_num}"]
                 
                 st.success("✅ Пачки сохранены!")
-                st.balloons()
                 time.sleep(1)
                 st.rerun()
 
@@ -2281,34 +2582,23 @@ def waiting_room_interface(player_num):
     # Вторая строка — данные
     col1, col2, col3, col4, col5 = st.columns(5)
     
+        # ========== ПОЛНАЯ ИНФОРМАЦИЯ О ЗАКУПКАХ ==========    
+    all_resources = [
+        "🛡️ Универсальная защита",
+        "🔵 Защита 5⭐", 
+        "🔴 Универсальное воскрешение",
+        "🔵 Воскрешение 5⭐",
+        "🔴 Универсальный бан",
+        "🔵 Бан 4-5⭐",
+        "🔄 Рестарт"
+    ]
+   
     with col1:
-        resources = data.get("resources", {})
-        bought = []
-        for res_name, count in resources.items():
+        history = data.get("purchase_history", {})
+        for name, count in history.items():
             if count > 0:
-                if res_name == "🔄 Рестарт":
-                    purchased = max(0, count - 1)
-                    if purchased > 0:
-                        bought.append(f"{res_name}: +{purchased}")
-                    else:
-                        bought.append(f"{res_name}: 1 (бесплатно)")
-                elif res_name == "🔴 Универсальный бан":
-                    purchased = max(0, count - 1)
-                    if purchased > 0:
-                        bought.append(f"{res_name}: +{purchased}")
-                    else:
-                        bought.append(f"{res_name}: 1 (бесплатно)")
-                else:
-                    bought.append(f"{res_name}: {count}")
-        
-        if bought:
-            for item in bought:
-                st.write(item)
-        else:
-            st.write("—")
-        
-        st.write(f"💎 Осталось: {data.get('points', 12)}")
-    
+                st.write(f"{name}: {count}")
+   
     with col2:
         protected = data.get("protected_heroes", [])
         character_db = data.get("character_db", {})
@@ -2432,6 +2722,12 @@ def judge_interface():
     p1 = st.session_state.get("p1", {})
     p2 = st.session_state.get("p2", {})
     
+    # ========== РАСЧЁТ РЕЗУЛЬТАТОВ БАНОВ ==========
+    ban_results = calculate_ban_results({"p1": p1, "p2": p2})
+    
+    # Сохраняем результаты в session_state для использования в других местах
+    st.session_state.ban_results = ban_results
+
     # ========== ЕСЛИ ЭТАП БОЯ - ПОКАЗЫВАЕМ ИНТЕРФЕЙС БОЯ ==========
     if p1.get("stage") == "battle" or p2.get("stage") == "battle":
         battle_interface()
@@ -2444,7 +2740,19 @@ def judge_interface():
     with col2:
         st.caption("Ключ: `judge_2024`")
     with col3:
-        if st.button("📥 Собрать данные", key="sync_btn", use_container_width=True):
+        if st.button("📥 Собрать данные участников", key="sync_btn", use_container_width=True):
+            # Загружаем старый judge_state, чтобы сохранить комнаты
+            old_judge_state = {}
+            if os.path.exists(JUDGE_FILE):
+                try:
+                    with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                        old_judge_state = json.load(f)
+                except:
+                    pass
+            
+            # Сохраняем старые комнаты
+            old_selected_rooms = old_judge_state.get("selected_rooms", [])
+            
             # Загружаем данные из файлов участников
             if os.path.exists(PLAYER1_FILE):
                 try:
@@ -2466,19 +2774,19 @@ def judge_interface():
                 except Exception as e:
                     st.error(f"Ошибка загрузки Участника 2: {e}")
             
-            # Сохраняем в файл судьи
+            # Сохраняем в файл судьи, сохраняя комнаты
             judge_state = {
                 "p1": st.session_state.p1,
                 "p2": st.session_state.p2,
-                "selected_rooms": st.session_state.get("temp_selected_rooms", [])
+                "selected_rooms": st.session_state.get("temp_selected_rooms", old_selected_rooms)
             }
+            
             with open(JUDGE_FILE, "w", encoding="utf-8") as f:
                 json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
             
-            st.success("📁 Данные сохранены в judge_data.json!")
+            st.success("📁 Данные участников и выбранные комнаты сохранены в judge_data.json!")
             time.sleep(1)
             st.rerun()
-    
     with col4:
         if st.button("🔄 Обновить", key="refresh_judge_btn", use_container_width=True):
             load_judge_data()
@@ -2550,11 +2858,13 @@ def judge_interface():
     col_advance, col_waiting, col_reset = st.columns(3)
     
     with col_advance:
-        # Переход по этапам (resources -> available -> protection -> bans -> picks)
+        # Переход по этапам
         if p1.get("ready") and p2.get("ready"):
             current_stage = p1.get("stage", "resources")
             
             can_advance = False
+            next_stage = current_stage
+            
             if current_stage == "resources":
                 can_advance = p1.get("finished_resources") and p2.get("finished_resources")
                 next_stage = "available"
@@ -2569,36 +2879,75 @@ def judge_interface():
                 next_stage = "picks"
             else:
                 can_advance = False
-                next_stage = current_stage
             
-            if can_advance and next_stage != current_stage:
-                if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn", use_container_width=True, type="primary"):
-                    p1["stage"] = next_stage
-                    p2["stage"] = next_stage
-                    
-                    # Сбрасываем флаги для нового этапа
-                    if next_stage == "available":
+            if can_advance:
+                # ОСОБЫЙ СЛУЧАЙ: переход на этап выбора оперативников
+                if next_stage == "available":
+                    if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn_available", use_container_width=True, type="primary"):
+                        # Переводим участников
+                        p1["stage"] = next_stage
+                        p2["stage"] = next_stage
                         p1["finished_available"] = False
                         p2["finished_available"] = False
-                    elif next_stage == "protection":
-                        p1["finished_protection"] = False
-                        p2["finished_protection"] = False
-                    elif next_stage == "bans":
-                        p1["finished_bans"] = False
-                        p2["finished_bans"] = False
-                    elif next_stage == "picks":
-                        p1["finished_picks"] = False
-                        p2["finished_picks"] = False
-                    
-                    st.session_state.p1 = p1
-                    st.session_state.p2 = p2
-                    save_player_data(1)
-                    save_player_data(2)
-                    save_judge_data()
-                    
-                    st.success(f"✅ Переход на {get_stage_name(next_stage)} выполнен!")
-                    time.sleep(1)
-                    st.rerun()
+                        
+                        st.session_state.p1 = p1
+                        st.session_state.p2 = p2
+                        save_player_data(1)
+                        save_player_data(2)
+                        
+                        # Сохраняем в файл судьи
+                        judge_state = {
+                            "p1": st.session_state.p1,
+                            "p2": st.session_state.p2,
+                            "selected_rooms": st.session_state.get("temp_selected_rooms", [])
+                        }
+                        with open(JUDGE_FILE, "w", encoding="utf-8") as f:
+                            json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
+                        
+                        # ПЕРЕКЛЮЧАЕМ СУДЬЮ В РЕЖИМ ВЫБОРА КОМНАТ
+                        st.session_state.rooms_selection_mode = True
+                        st.success(f"✅ Переход на {get_stage_name(next_stage)} выполнен!")
+                        st.info("🏠 Теперь выберите комнаты для турнира")
+                        st.rerun()
+                
+                
+                # Обычный переход для других этапов
+                else:
+                    if st.button(f"➡️ Перейти к этапу: {get_stage_name(next_stage)}", key="advance_btn_other", use_container_width=True, type="primary"):
+                        p1["stage"] = next_stage
+                        p2["stage"] = next_stage
+                        
+                        if next_stage == "protection":
+                            p1["finished_protection"] = False
+                            p2["finished_protection"] = False
+                        elif next_stage == "bans":
+                            p1["finished_bans"] = False
+                            p2["finished_bans"] = False
+                        elif next_stage == "picks":
+                            p1["finished_picks"] = False
+                            p2["finished_picks"] = False
+                            
+                            # Пересчитываем результаты банов
+                            ban_results = calculate_ban_results({"p1": p1, "p2": p2})
+                            
+                            # Сохраняем в файл судьи
+                            judge_state = {
+                                "p1": p1,
+                                "p2": p2,
+                                "selected_rooms": st.session_state.get("temp_selected_rooms", []),
+                                "ban_results": ban_results
+                            }
+                            with open(JUDGE_FILE, "w", encoding="utf-8") as f:
+                                json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
+                            
+                        st.session_state.p1 = p1
+                        st.session_state.p2 = p2
+                        save_player_data(1)
+                        save_player_data(2)
+                        save_judge_data()
+                        
+                        st.success(f"✅ Переход на {get_stage_name(next_stage)} выполнен!")
+                        st.rerun()
             else:
                 st.info(f"⏳ {get_stage_name(current_stage)}...")
         else:
@@ -2631,7 +2980,6 @@ def judge_interface():
                     save_player_data(2)
                     save_judge_data()
                     st.success("⚔️ БОИ НАЧАЛИСЬ! ⚔️")
-                    st.balloons()
                     time.sleep(2)
                     st.rerun()
         else:
@@ -2650,28 +2998,36 @@ def judge_interface():
     
     st.divider()
     
-    # Информация о выбранных комнатах
+    # Информация о выбранных комнатах (загружаем из JUDGE_FILE)
     with st.expander("🏠 Выбранные комнаты", expanded=False):
-        selected_rooms = get_selected_rooms()
-        if selected_rooms:
-            for idx, room in enumerate(selected_rooms, 1):
-                st.write(f"{idx}. Комната {room}")
+        if os.path.exists(JUDGE_FILE):
+            try:
+                with open(JUDGE_FILE, "r", encoding="utf-8") as f:
+                    judge_data = json.load(f)
+                    selected_rooms = judge_data.get("selected_rooms", [])
+                    if selected_rooms:
+                        for idx, room in enumerate(selected_rooms, 1):
+                            st.write(f"{idx}. Комната {room}")
+                    else:
+                        st.info("Комнаты еще не выбраны")
+            except:
+                st.info("Комнаты еще не выбраны")
         else:
-            st.info("Комнаты не выбраны")
+            st.info("Комнаты еще не выбраны")
     
     # Информация о ресурсах
     with st.expander("💰 Ресурсы участников", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"**{p1.get('nickname', 'Участник 1')}**")
-            resources = p1.get("resources", {})
-            for name, count in resources.items():
+            history = p1.get("purchase_history", {})
+            for name, count in history.items():
                 if count > 0:
                     st.write(f"{name}: {count}")
         with col2:
             st.markdown(f"**{p2.get('nickname', 'Участник 2')}**")
-            resources = p2.get("resources", {})
-            for name, count in resources.items():
+            history = p2.get("purchase_history", {})
+            for name, count in history.items():
                 if count > 0:
                     st.write(f"{name}: {count}")
     
@@ -2783,7 +3139,6 @@ def rooms_selection_only_interface():
                     json.dump(judge_state, f, ensure_ascii=False, indent=2, default=str)
                 
                 st.success("✅ Комнаты выбраны и сохранены!")
-                st.balloons()
                 time.sleep(1)
                 st.session_state.rooms_selection_mode = False
                 st.rerun()
@@ -2791,6 +3146,33 @@ def rooms_selection_only_interface():
             st.button("✅ Подтвердить и продолжить", disabled=True, use_container_width=True)
             st.caption(f"⚠️ Нужно выбрать 3 комнаты (выбрано {len(st.session_state.temp_selected_rooms)})")
 
+
+def calculate_ban_results(judge_data):
+    """Расчёт доступности оперативников после банов (математическая формула)"""
+    
+    p1 = judge_data.get("p1", {})
+    p2 = judge_data.get("p2", {})
+    
+    p1_bans = p1.get("bans", {})
+    p2_bans = p2.get("bans", {})
+    p1_protected = set(p1.get("protected_heroes", []))
+    p2_protected = set(p2.get("protected_heroes", []))
+    
+    # Собираем всех оперативников
+    all_heroes = set(p1_bans.keys()) | set(p2_bans.keys()) | p1_protected | p2_protected
+    
+    results = {"p1": {}, "p2": {}}
+    
+    for hero_id in all_heroes:
+        total_bans = p1_bans.get(hero_id, 0) + p2_bans.get(hero_id, 0)
+        
+        protect_p1 = 1 if hero_id in p1_protected else 0
+        protect_p2 = 1 if hero_id in p2_protected else 0
+        
+        results["p1"][hero_id] = (total_bans - protect_p1) <= 0
+        results["p2"][hero_id] = (total_bans - protect_p2) <= 0
+    
+    return results
 
 # ========== 10. ИНТЕРФЕЙС БОЯ ==========
 
@@ -2807,248 +3189,370 @@ def battle_interface():
     p2 = st.session_state.get("p2", {})
     selected_rooms = get_selected_rooms()
     
-    # Инициализация результатов боёв в session_state
+    if len(selected_rooms) < 3:
+        st.error("❌ Не выбраны комнаты для боя!")
+        return
+    
+    # Функция для подсчёта очков (ничья = 0.5)
+    def calculate_scores():
+        score_p1 = 0.0
+        score_p2 = 0.0
+        draws = 0
+        for room, result in st.session_state.get("battle_results", {}).items():
+            if result.get("winner") == "p1":
+                score_p1 += 1
+            elif result.get("winner") == "p2":
+                score_p2 += 1
+            elif result.get("winner") == "draw":
+                score_p1 += 0.5
+                score_p2 += 0.5
+                draws += 1
+        return score_p1, score_p2, draws
+    
+    # Функция валидации времени
+    def validate_time_format(time_str):
+        import re
+        if not time_str:
+            return True
+        pattern = r'^(\d{1,2}):(\d{1,2})$'
+        match = re.match(pattern, time_str.strip())
+        if match:
+            seconds = int(match.group(2))
+            return 0 <= seconds < 60
+        return False
+    
+    def format_time_display(time_str):
+        if not time_str:
+            return ""
+        time_str = time_str.strip()
+        if ":" not in time_str and time_str.isdigit():
+            if len(time_str) <= 2:
+                return f"0:{time_str}"
+            elif len(time_str) == 3:
+                return f"{time_str[0]}:{time_str[1:3]}"
+            elif len(time_str) == 4:
+                return f"{time_str[:2]}:{time_str[2:4]}"
+        return time_str
+    
+    # Инициализация результатов боёв
     if "battle_results" not in st.session_state:
         st.session_state.battle_results = {}
-        for i in range(3):
-            st.session_state.battle_results[i] = {
-                "winner": None,  # "p1", "p2", "draw"
+        for i, room in enumerate(selected_rooms):
+            st.session_state.battle_results[room] = {
+                "winner": None,
+                "time_p1": "",
+                "time_p2": "",
                 "restart_used_p1": False,
-                "restart_used_p2": False
+                "restart_used_p2": False,
+                "active": i == 0
             }
     
-    # Информация об участниках
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f"### ⚔️ {p1.get('nickname', 'Участник 1')}")
-        # Отображение пачек участника 1
-        picks_p1 = p1.get("picks", [[None for _ in range(4)] for _ in range(3)])
-        for room_idx in range(3):
-            if room_idx < len(selected_rooms):
-                st.markdown(f"**Комната {selected_rooms[room_idx]}**")
-            else:
-                st.markdown(f"**Комната {room_idx + 1}**")
-            pack = picks_p1[room_idx] if room_idx < len(picks_p1) else []
-            if any(pack):
-                hero_names = []
-                for hero_id in pack:
-                    if hero_id:
-                        hero_info = p1.get("character_db", {}).get(hero_id, {})
-                        hero_names.append(hero_info.get("name", "?"))
-                st.write(" → ".join(hero_names))
-            else:
-                st.write("*пустая пачка*")
+    # Получаем пачки
+    picks_p1 = p1.get("picks", [[None for _ in range(4)] for _ in range(3)])
+    picks_p2 = p2.get("picks", [[None for _ in range(4)] for _ in range(3)])
     
-    with col2:
-        st.markdown(f"### ⚔️ {p2.get('nickname', 'Участник 2')}")
-        picks_p2 = p2.get("picks", [[None for _ in range(4)] for _ in range(3)])
-        for room_idx in range(3):
-            if room_idx < len(selected_rooms):
-                st.markdown(f"**Комната {selected_rooms[room_idx]}**")
-            else:
-                st.markdown(f"**Комната {room_idx + 1}**")
-            pack = picks_p2[room_idx] if room_idx < len(picks_p2) else []
-            if any(pack):
-                hero_names = []
-                for hero_id in pack:
-                    if hero_id:
-                        hero_info = p2.get("character_db", {}).get(hero_id, {})
-                        hero_names.append(hero_info.get("name", "?"))
-                st.write(" → ".join(hero_names))
-            else:
-                st.write("*пустая пачка*")
+    # Получаем ресурсы рестартов
+    restart_p1 = p1.get("resources", {}).get("🔄 Рестарт", 0)
+    restart_p2 = p2.get("resources", {}).get("🔄 Рестарт", 0)
+    
+    # Кнопка сброса
+    col_reset1, col_reset2, col_reset3 = st.columns([1, 2, 1])
+    with col_reset2:
+        if st.button("🗑️ СБРОСИТЬ ВСЕ РЕЗУЛЬТАТЫ", key="reset_all_battles", use_container_width=True):
+            for i, room in enumerate(selected_rooms):
+                st.session_state.battle_results[room] = {
+                    "winner": None,
+                    "time_p1": "",
+                    "time_p2": "",
+                    "restart_used_p1": False,
+                    "restart_used_p2": False,
+                    "active": (i == 0)  # только первая комната активна
+                }
+            st.rerun()
     
     st.divider()
     
-    # ========== ВВОД РЕЗУЛЬТАТОВ БОЁВ ==========
-    st.markdown("### 📋 Результаты комнат")
+    # Функция отображения пачки
+    def render_pack(pack, room_idx):
+        if room_idx < len(pack):
+            heroes = pack[room_idx]
+            cols = st.columns(4)
+            for idx, hero_id in enumerate(heroes):
+                with cols[idx]:
+                    if hero_id:
+                        hero_info = p1.get("character_db", {}).get(hero_id, {}) or p2.get("character_db", {}).get(hero_id, {})
+                        img = load_operator_image(hero_info.get("name", ""))
+                        if img:
+                            st.image(img, width=152)
+                        else:
+                            st.write("🎴")
+                    else:
+                        st.write("⬜")
     
-    # Получаем ресурсы участников для проверки рестартов
-    resources_p1 = p1.get("resources", {})
-    resources_p2 = p2.get("resources", {})
-    restart_p1 = resources_p1.get("🔄 Рестарт", 0)
-    restart_p2 = resources_p2.get("🔄 Рестарт", 0)
+    # Получаем текущий счёт перед циклом
+    score_p1, score_p2, draws = calculate_scores()
     
-    # Счёт побед
-    score_p1 = 0
-    score_p2 = 0
+    # Определяем, нужна ли третья комната
+    need_third_room = not ((score_p1 >= 2 and score_p2 == 0) or (score_p2 >= 2 and score_p1 == 0))
     
-    for room_idx in range(3):
-        room_name = selected_rooms[room_idx] if room_idx < len(selected_rooms) else f"Комната {room_idx + 1}"
+    # Формируем список комнат для отображения
+    rooms_to_display = []
+    for i, room in enumerate(selected_rooms):
+        if i == 2 and not need_third_room:
+            continue
+        rooms_to_display.append(room)
+    
+    # Обновляем активность комнат (без rerun)
+    for i, room in enumerate(rooms_to_display):
+        if i == 0:
+            # Первая комната активна по умолчанию
+            if st.session_state.battle_results[room].get("active") is None:
+                st.session_state.battle_results[room]["active"] = True
+        else:
+            prev_room = rooms_to_display[i - 1]
+            # Активируем, если предыдущая завершена и эта ещё не активна
+            if (st.session_state.battle_results[prev_room].get("winner") is not None and 
+                not st.session_state.battle_results[room].get("active", False)):
+                st.session_state.battle_results[room]["active"] = True
+                st.rerun()  # Один rerun при активации
+                break
+    
+    # Основной цикл по комнатам, которые нужно показать
+    for room_idx, room in enumerate(rooms_to_display):
+        real_idx = selected_rooms.index(room)
+        result = st.session_state.battle_results[room]
+        is_active = result.get("active", False)
         
-        st.markdown(f"#### {room_name}")
+        if is_active:
+            st.markdown(f"### ⭐ КОМНАТА {room} (АКТИВНА) ⭐")
+        else:
+            st.markdown(f"### 🏠 КОМНАТА {room}")
         
-        result = st.session_state.battle_results[room_idx]
-        current_winner = result["winner"]
+        col_left, col_center, col_right = st.columns([0.4, 0.2, 0.4])
         
-        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+        # ========== ЛЕВАЯ КОЛОНКА (Участник 2) ==========
+        with col_left:
+            render_pack(picks_p2, room_idx)
         
-        with col1:
-            st.write("**Победитель:**")
-            winner_options = {
-                None: "— не выбран —",
-                "p1": f"{p1.get('nickname', 'Участник 1')}",
-                "p2": f"{p2.get('nickname', 'Участник 2')}",
-                "draw": "Ничья"
-            }
-            selected_winner = st.selectbox(
-                "Победитель",
-                options=list(winner_options.keys()),
-                format_func=lambda x: winner_options[x],
-                key=f"winner_{room_idx}"
-            )
-            if selected_winner != current_winner:
-                st.session_state.battle_results[room_idx]["winner"] = selected_winner
-                st.rerun()
+        # ========== ПРАВАЯ КОЛОНКА (Участник 1) ==========
+        with col_right:
+            render_pack(picks_p1, room_idx)
         
-        with col2:
-            if current_winner == "p1":
-                st.success("🏆")
-                score_p1 += 1
-            elif current_winner == "p2":
-                st.success("🏆")
-                score_p2 += 1
-            elif current_winner == "draw":
-                st.info("🤝")
-        
-        with col3:
-            # Рестарт для участника 1
-            restart_used = result.get("restart_used_p1", False)
-            if restart_used:
-                st.success("✅ Рестарт использован")
-            else:
-                if restart_p1 > 0:
-                    if st.button(f"🔄 Рестарт ({p1.get('nickname', 'Участник 1')})", key=f"restart_p1_{room_idx}"):
-                        st.session_state.battle_results[room_idx]["restart_used_p1"] = True
-                        # Сбрасываем победителя
-                        st.session_state.battle_results[room_idx]["winner"] = None
-                        # Уменьшаем ресурс рестарта в временных данных
-                        st.session_state[f"temp_restart_update_p1"] = st.session_state.get(f"temp_restart_update_p1", 0) + 1
+        # ========== ЦЕНТРАЛЬНАЯ КОЛОНКА ==========
+        with col_center:
+            # Два поля времени в ряд (две строки)
+            # Строка 1: заголовки
+            time_col1, time_col2 = st.columns(2)
+            with time_col1:
+                st.markdown(f"**{p2.get('nickname', 'Участник 2')}**")
+            with time_col2:
+                st.markdown(f"**{p1.get('nickname', 'Участник 1')}**")
+            
+            # Строка 2: поля ввода времени
+            time_col1, time_col2 = st.columns(2)
+            with time_col1:
+                time_p2_val = st.text_input(
+                    "⏱️",
+                    value=result["time_p2"],
+                    key=f"time_p2_{room}",
+                    placeholder="м:сс",
+                    label_visibility="collapsed"
+                )
+                if time_p2_val != result["time_p2"]:
+                    if validate_time_format(time_p2_val):
+                        result["time_p2"] = format_time_display(time_p2_val)
+                        st.session_state.battle_results[room] = result
+                    else:
+                        st.warning("Неверный формат")
+            
+            with time_col2:
+                time_p1_val = st.text_input(
+                    "⏱️",
+                    value=result["time_p1"],
+                    key=f"time_p1_{room}",
+                    placeholder="м:сс",
+                    label_visibility="collapsed"
+                )
+                if time_p1_val != result["time_p1"]:
+                    if validate_time_format(time_p1_val):
+                        result["time_p1"] = format_time_display(time_p1_val)
+                        st.session_state.battle_results[room] = result
+                    else:
+                        st.warning("Неверный формат")
+            
+            st.markdown("---")
+            
+            # Рестарты в три колонки
+            restart_col1, restart_col2, restart_col3 = st.columns([1, 1, 1])
+            
+            with restart_col1:
+                # Считаем, сколько рестартов уже использовано в ЭТОЙ комнате
+                used_in_this_room_p2 = result.get("restart_count_p2", 0)
+                remaining_restarts_p2 = restart_p2 - sum(r.get("restart_count_p2", 0) for r in st.session_state.battle_results.values())
+                
+                if remaining_restarts_p2 > 0 and is_active and result.get("winner") is None:
+                    if st.button(f"🔄 Рестарт {p2.get('nickname', 'Участник 2')} ({remaining_restarts_p2})", key=f"restart_p2_{room}", use_container_width=True):
+                        result["time_p2"] = ""
+                        result["winner"] = None
+                        # Увеличиваем счётчик рестартов в этой комнате
+                        result["restart_count_p2"] = used_in_this_room_p2 + 1
+                        st.session_state.battle_results[room] = result
                         st.rerun()
+                elif result.get("restart_count_p2", 0) > 0:
+                    st.caption(f"🔄 ({result.get('restart_count_p2', 0)} раз)")
                 else:
-                    st.button(f"❌ Нет рестарта", key=f"restart_p1_disabled_{room_idx}", disabled=True)
-        
-        with col4:
-            # Рестарт для участника 2
-            restart_used = result.get("restart_used_p2", False)
-            if restart_used:
-                st.success("✅ Рестарт использован")
-            else:
-                if restart_p2 > 0:
-                    if st.button(f"🔄 Рестарт ({p2.get('nickname', 'Участник 2')})", key=f"restart_p2_{room_idx}"):
-                        st.session_state.battle_results[room_idx]["restart_used_p2"] = True
-                        st.session_state.battle_results[room_idx]["winner"] = None
-                        st.session_state[f"temp_restart_update_p2"] = st.session_state.get(f"temp_restart_update_p2", 0) + 1
+                    st.caption("—")
+            
+            with restart_col2:
+                st.markdown("<div style='text-align: center; font-weight: bold;'>VS</div>", unsafe_allow_html=True)
+            
+            with restart_col3:
+                used_in_this_room_p1 = result.get("restart_count_p1", 0)
+                remaining_restarts_p1 = restart_p1 - sum(r.get("restart_count_p1", 0) for r in st.session_state.battle_results.values())
+                
+                if remaining_restarts_p1 > 0 and is_active and result.get("winner") is None:
+                    if st.button(f"🔄 Рестарт {p1.get('nickname', 'Участник 1')} ({remaining_restarts_p1})", key=f"restart_p1_{room}", use_container_width=True):
+                        result["time_p1"] = ""
+                        result["winner"] = None
+                        result["restart_count_p1"] = used_in_this_room_p1 + 1
+                        st.session_state.battle_results[room] = result
                         st.rerun()
+                elif result.get("restart_count_p1", 0) > 0:
+                    st.caption(f"🔄 ({result.get('restart_count_p1', 0)} раз)")
                 else:
-                    st.button(f"❌ Нет рестарта", key=f"restart_p2_disabled_{room_idx}", disabled=True)
-        
-        with col5:
-            # Кнопка сброса результата комнаты
-            if st.button(f"🗑️ Сбросить", key=f"reset_room_{room_idx}"):
-                st.session_state.battle_results[room_idx]["winner"] = None
-                st.rerun()
+                    st.caption("—")
+            
+            st.markdown("---")
+            
+            # Выбор победителя (только если комната активна)
+            st.markdown("**🏆 Победитель**")
+            
+            if is_active:
+                winner_options = {
+                    None: "— не выбран —",
+                    "p2": f"{p2.get('nickname', 'Участник 2')} (слева)",
+                    "p1": f"{p1.get('nickname', 'Участник 1')} (справа)",
+                    "draw": "Ничья"
+                }
+                
+                current_winner = result["winner"]
+                
+                selected_winner = st.selectbox(
+                    "Выберите победителя",
+                    options=list(winner_options.keys()),
+                    format_func=lambda x: winner_options[x],
+                    key=f"winner_select_{room}",
+                    label_visibility="collapsed"
+                )
+                
+                if selected_winner != current_winner and selected_winner is not None:
+                    result["winner"] = selected_winner
+                    st.session_state.battle_results[room] = result
+                    
+                    if selected_winner == "p1":
+                        st.success(f"✅ Молодец {p1.get('nickname', 'Участник 1')}! 🎉")
+                    elif selected_winner == "p2":
+                        st.success(f"✅ Молодец {p2.get('nickname', 'Участник 2')}! 🎉")
+                    elif selected_winner == "draw":
+                        st.info("🤝 Держи член")
+                    
+                    # Деактивируем текущую комнату и активируем следующую
+                    result["active"] = False
+                    st.session_state.battle_results[room] = result
+                    
+                    if room_idx + 1 < len(selected_rooms):
+                        next_room = selected_rooms[room_idx + 1]
+                        st.session_state.battle_results[next_room]["active"] = True
+                    
+                    st.rerun()
+                
+                if result["winner"] is not None:
+                    if result["winner"] == "p1":
+                        st.success(f"✅ Молодец {winner_options[result['winner']]}")
+                    elif result["winner"] == "p2":
+                        st.success(f"✅ Молодец {winner_options[result['winner']]}")
+                    else:
+                        st.info("🤝 Держи член")
+            else:
+                if result["winner"] is not None:
+                    if result["winner"] == "p1":
+                        st.success(f"🏆 Подебитель {p1.get('nickname', 'Участник 1')} (справа)")
+                    elif result["winner"] == "p2":
+                        st.success(f"🏆 Подебитель {p2.get('nickname', 'Участник 2')} (слева)")
+                    elif result["winner"] == "draw":
+                        st.info("🤝 Держи член")
+                else:
+                    st.caption("—")
         
         st.divider()
     
-    # ========== ОТОБРАЖЕНИЕ СЧЁТА ==========
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(f"{p1.get('nickname', 'Участник 1')}", score_p1)
-    with col2:
-        st.metric(f"{p2.get('nickname', 'Участник 2')}", score_p2)
-    with col3:
-        if score_p1 > score_p2:
-            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ведёт Участник 1")
-        elif score_p2 > score_p1:
-            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ведёт Участник 2")
-        else:
-            st.metric("Счёт", f"{score_p1} : {score_p2}", delta="Ничья")
+    # ========== ПОДСЧЁТ СЧЁТА ПОСЛЕ ЦИКЛА ==========
+    final_score_p1, final_score_p2, final_draws = calculate_scores()
     
     st.divider()
-    
-    # ========== КНОПКИ УПРАВЛЕНИЯ ==========
     col1, col2, col3 = st.columns(3)
-    
     with col1:
-        # Применяем использованные рестарты к данным участников
-        temp_restart_p1 = st.session_state.get(f"temp_restart_update_p1", 0)
-        temp_restart_p2 = st.session_state.get(f"temp_restart_update_p2", 0)
-        
-        if temp_restart_p1 > 0 or temp_restart_p2 > 0:
-            if st.button("💾 Составить протокол рестартов", key="apply_restarts", use_container_width=True):
-                # Обновляем ресурсы участников в файлах
-                if temp_restart_p1 > 0:
-                    new_restart_p1 = max(0, restart_p1 - temp_restart_p1)
-                    p1["resources"]["🔄 Рестарт"] = new_restart_p1
-                    st.session_state.p1 = p1
-                    save_player_data(1)
-                
-                if temp_restart_p2 > 0:
-                    new_restart_p2 = max(0, restart_p2 - temp_restart_p2)
-                    p2["resources"]["🔄 Рестарт"] = new_restart_p2
-                    st.session_state.p2 = p2
-                    save_player_data(2)
-                
-                # Обновляем файл судьи
-                save_judge_data()
-                
-                st.session_state[f"temp_restart_update_p1"] = 0
-                st.session_state[f"temp_restart_update_p2"] = 0
-                st.success("✅ Рестарты списаны!")
-                st.rerun()
-    
+        st.metric(p1.get("nickname", "Участник 1"), f"{final_score_p1:.1f}")
     with col2:
-        if st.button("🏆 ЗАВЕРШИТЬ ТУРНИР", key="finish_tournament", use_container_width=True, type="primary"):
-            # Проверяем, что все комнаты имеют результат
-            all_rooms_set = all(
-                st.session_state.battle_results[room_idx]["winner"] is not None 
-                for room_idx in range(3)
-            )
-            
-            if not all_rooms_set:
-                st.error("❌ Укажите результаты всех трёх комнат!")
-            else:
-                # Объявляем победителя
-                if score_p1 > score_p2:
-                    winner = p1.get('nickname', 'Участник 1')
-                    st.balloons()
-                    st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {winner}!!! 🏆")
-                elif score_p2 > score_p1:
-                    winner = p2.get('nickname', 'Участник 2')
-                    st.balloons()
-                    st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {winner}!!! 🏆")
-                else:
-                    st.info("🤝 НИЧЬЯ В ТУРНИРЕ!")
-                
-                # Переводим участников на финальный этап
-                p1["stage"] = "finished"
-                p2["stage"] = "finished"
-                st.session_state.p1 = p1
-                st.session_state.p2 = p2
-                save_player_data(1)
-                save_player_data(2)
-                save_judge_data()
-                
-                # Очищаем временные данные
-                if "battle_results" in st.session_state:
-                    del st.session_state.battle_results
-                if "temp_restart_update_p1" in st.session_state:
-                    del st.session_state.temp_restart_update_p1
-                if "temp_restart_update_p2" in st.session_state:
-                    del st.session_state.temp_restart_update_p2
-                
-                st.success("🏆 ТУРНИР ЗАВЕРШЁН! 🏆")
-                time.sleep(3)
-                st.rerun()
-    
+        st.metric("Ничьи", final_draws)
     with col3:
-        if st.button("🔄 Сбросить все результаты", key="reset_all_results", use_container_width=True):
-            for room_idx in range(3):
-                st.session_state.battle_results[room_idx]["winner"] = None
-            st.rerun()
+        st.metric(p2.get("nickname", "Участник 2"), f"{final_score_p2:.1f}")
     
-    st.caption("💡 **Инструкция:** Выберите победителя для каждой комнаты. При необходимости используйте кнопки 'Рестарт' — они спишут ресурс у участника. После заполнения всех комнат нажмите 'Завершить турнир'.")
+    # Проверка, все ли комнаты завершены (включая третью, если она была нужна)
+    all_completed = all(
+        st.session_state.battle_results[room]["winner"] is not None 
+        for room in selected_rooms
+    )
+    
+    # Проверка, можно ли завершить турнир досрочно (при счёте 2:0)
+    can_finish_early = (final_score_p1 >= 2 and final_score_p2 == 0) or (final_score_p2 >= 2 and final_score_p1 == 0)
+    
+    # ========== КНОПКА ЗАВЕРШЕНИЯ ==========
+    st.divider()
+    
+    if all_completed or can_finish_early:
+        if final_score_p1 > final_score_p2:
+            st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {p1.get('nickname', 'Участник 1')}!!! 🏆")
+        elif final_score_p2 > final_score_p1:
+            st.success(f"🏆 ПОБЕДИТЕЛЬ ТУРНИРА: {p2.get('nickname', 'Участник 2')}!!! 🏆")
+        else:
+            if final_draws > 0:
+                st.warning("🤝 НИЧЬЯ! ТРЕБУЕТСЯ ТАЙ-БРЕЙК 🤝")
+        
+        # Кнопка завершения турнира (всегда показываем, если есть победитель или все комнаты завершены)
+        if st.button("🏁 ЗАВЕРШИТЬ ТУРНИР", key="finish_tournament", type="primary", use_container_width=True):
+            p1["stage"] = "finished"
+            p2["stage"] = "finished"
+            st.session_state.p1 = p1
+            st.session_state.p2 = p2
+            save_player_data(1)
+            save_player_data(2)
+            save_judge_data()
+            
+            if "battle_results" in st.session_state:
+                del st.session_state.battle_results
+            
+            st.success("🏆 ТУРНИР ЗАВЕРШЁН! 🏆")
+            time.sleep(2)
+            st.rerun()
+    else:
+        # Активация следующей комнаты, если текущая завершена
+        for i, room in enumerate(selected_rooms):
+            if st.session_state.battle_results[room]["winner"] is not None:
+                if i + 1 < len(selected_rooms):
+                    next_room = selected_rooms[i + 1]
+                    if not st.session_state.battle_results[next_room].get("active", False):
+                        # Проверяем, нужна ли третья комната
+                        if i + 1 == 2:  # это третья комната
+                            if (final_score_p1 >= 2 and final_score_p2 == 0) or (final_score_p2 >= 2 and final_score_p1 == 0):
+                                # Третья комната не нужна, пропускаем
+                                continue
+                        st.session_state.battle_results[next_room]["active"] = True
+                        st.rerun()
+                break
+        
+        st.info("⏳ Ожидание фиксации всех комнат...")
+
 
 def get_stage_name(stage_key):
     """Возвращает русское название этапа"""
